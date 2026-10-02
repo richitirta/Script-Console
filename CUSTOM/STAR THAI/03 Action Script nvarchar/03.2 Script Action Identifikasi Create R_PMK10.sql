@@ -1,0 +1,370 @@
+CREATE FUNCTION [dbo].[R_PMK10_2011_Deductible] (@P_ANO as integer) 
+RETURNS Nvarchar(255) 
+With SchemaBinding 
+AS 
+BEGIN 
+ Declare @OwnRisks as Nvarchar(255) 
+ Declare @OwnRisk as Nvarchar(255) 
+ Select @OwnRisks='' 
+ DECLARE PolicyDeductible_Cursor CURSOR FOR 
+ Select distinct ltrim(rtrim(AccDed.Remarks)) as OwnRisk 
+ FROM DBO.COVER COVER 
+ INNER JOIN DBO.ACCEPTANCE ACCEPTANCE ON COVER.CNO = ACCEPTANCE.CNO 
+ INNER JOIN DBO.ACCDED ACCDED ON (ACCDED.ANO=ACCEPTANCE.ANO) 
+ INNER JOIN DBO.RCLASS RCLASS ON (RCLASS.TOR=ACCDED.TOR AND RCLASS.TOC=COVER.TOC AND RCLASS.CATEGORY='M') 
+ WHERE ACCEPTANCE.ANO=@P_ANO 
+ AND ACCDED.DCODE IN ('C01-1','C01-2','C01-3','C01-4','C01-6','C01-7','C01-10', 'C01-11','T02-1','T02-6','T02-8','T02-9','T02-10','T02-12') -- SPECIFIED DEDUCTIBLE CODE 
+ OPEN PolicyDeductible_Cursor 
+ FETCH FROM PolicyDeductible_Cursor into @OwnRisk 
+ WHILE @@FETCH_STATUS = 0 
+ BEGIN 
+ if @OwnRisks='' 
+ BEGIN 
+ Select @OwnRisks=@OwnRisk 
+ End 
+ Else 
+ BEGIN 
+ Select @OwnRisks=substring(@OwnRisks+'; '+@OwnRisk,1,255) 
+ End 
+ FETCH NEXT FROM PolicyDeductible_Cursor into @OwnRisk 
+ End 
+ Close PolicyDeductible_Cursor 
+ Deallocate PolicyDeductible_Cursor 
+ Return (coalesce(@OwnRisks,'')) 
+End 
+
+ GO 
+
+
+Create Function [dbo].[R_PMK10_2011_GeneralTable](@P_FLDID as varchar(10), @P_VALUEID as varchar(20))
+RETURNS varchar(20)
+With SchemaBinding
+AS    
+BEGIN    
+ Declare @ValueID as varchar(20)
+
+ DECLARE GeneralTable_Cursor CURSOR FOR    
+	Select  
+	CASE 
+	WHEN GENDTAB.FLDID1='I07' THEN GENDTAB.VALUEDESC1
+	WHEN GENDTAB.FLDID2='I07' THEN GENDTAB.VALUEDESC2
+	WHEN GENDTAB.FLDID3='I07' THEN GENDTAB.VALUEDESC3
+	WHEN GENDTAB.FLDID4='I07' THEN GENDTAB.VALUEDESC4
+	WHEN GENDTAB.FLDID5='I07' THEN GENDTAB.VALUEDESC5
+	WHEN GENDTAB.FLDID6='I07' THEN GENDTAB.VALUEDESC6
+	WHEN GENDTAB.FLDID7='I07' THEN GENDTAB.VALUEDESC7
+	WHEN GENDTAB.FLDID8='I07' THEN GENDTAB.VALUEDESC8
+	WHEN GENDTAB.FLDID9='I07' THEN GENDTAB.VALUEDESC9
+	WHEN GENDTAB.FLDID10='I07' THEN GENDTAB.VALUEDESC10
+	WHEN GENDTAB.FLDID11='I07' THEN GENDTAB.VALUEDESC11
+	WHEN GENDTAB.FLDID12='I07' THEN GENDTAB.VALUEDESC12
+	WHEN GENDTAB.FLDID13='I07' THEN GENDTAB.VALUEDESC13
+	WHEN GENDTAB.FLDID14='I07' THEN GENDTAB.VALUEDESC14
+	WHEN GENDTAB.FLDID15='I07' THEN GENDTAB.VALUEDESC15
+	END AS VALUEID
+	from DBO.GENDTAB GENDTAB
+	Where GENDTAB.FLDID=@P_FLDID AND GENDTAB.VALUEID=@P_VALUEID
+  
+ OPEN GeneralTable_Cursor    
+ FETCH FROM GeneralTable_Cursor into @ValueID
+ Close GeneralTable_Cursor    
+ Deallocate GeneralTable_Cursor    
+ Return (@ValueID)    
+End 
+
+
+
+
+ GO 
+
+Create Function [dbo].[R_PMK10_2014_COL](@P_CNO as int) 
+RETURNS VARCHAR(10)  
+With SchemaBinding
+AS    
+BEGIN    
+ DECLARE @Word AS VARCHAR(10)
+ DECLARE @ResultWord AS VARCHAR(10)
+ Declare @COL as varchar(50)  
+ DECLARE @Remark AS VARCHAR(512)  
+
+ Select @Word=''
+ DECLARE COL_Cursor CURSOR FOR    
+ Select Distinct cast(CT.COL as varchar(50)) as COL, cast(CT.DESCRIPTION as varchar(512)) as Remark
+ from DBO.CLAIM C, DBO.COLTAB CT
+ Where C.COL=CT.COL and C.CNO=@P_CNO
+ OPEN COL_Cursor    
+ FETCH FROM COL_Cursor into @COL, @Remark
+ WHILE @@FETCH_STATUS = 0    
+ BEGIN    
+
+	if @Remark LIKE '%fire%' OR @Remark LIKE '%Lighting%' OR @Remark LIKE '%Explosion%' OR @Remark LIKE '%Aircraft%Impact%' OR @Remark LIKE '%Smoke%Damage%'  OR @Remark LIKE '%FLEXAS%'
+	SELECT @ResultWord = 'A'
+    else if @Remark LIKE '%Flood%' OR @Remark LIKE '%Storm%' OR @Remark LIKE '%Typhoon%' OR @Remark LIKE '%Water%Damage' OR @Remark LIKE '%FSTWD%'
+	SELECT @ResultWord = 'B'
+    else if @Remark LIKE '%EQ%' OR @Remark LIKE '%Earthquake%' OR @Remark LIKE '%Volanic%Eruption' OR @Remark LIKE '%Trunami%' OR @Remark LIKE '%EQVET%'
+	SELECT @ResultWord = 'C'
+	else if @Remark LIKE '%Riot%' OR @Remark LIKE '%Strike%' OR @Remark LIKE '%Malicious%Damage' OR @Remark LIKE '%RSMD%' OR @Remark LIKE '%4.1%'
+	SELECT @ResultWord = 'D'
+	else if @Remark LIKE '%Civil%Commotion'
+	SELECT @ResultWord = 'E'
+    else if @Remark LIKE '%Terorism%' OR @Remark LIKE '%Sabotage%'
+	SELECT @ResultWord = 'F'
+    else if @Remark LIKE '%Vehicle%Impact' OR @Remark LIKE '%Impact%Vehicle%'
+	SELECT @ResultWord = 'G'
+	else if @Remark LIKE '%Electrical' OR @Remark LIKE '%Short%Circuit'
+	SELECT @ResultWord = 'H'
+	else if @Remark LIKE '%Landslide%' OR @Remark LIKE '%Subsidence%' OR @Remark LIKE '%Collapse%'
+	SELECT @ResultWord = 'I'
+	else if @Remark LIKE '%Burglary%' OR @Remark LIKE '%Theft%'
+	SELECT @ResultWord = 'J'
+    else if (@Remark NOT LIKE '%fire%' OR @Remark NOT LIKE '%Lighting%' OR @Remark NOT LIKE '%Explosion%' OR @Remark NOT LIKE '%Aircraft%Impact%' OR @Remark NOT LIKE '%Smoke%Damage%'  OR @Remark NOT LIKE '%FLEXAS%' OR
+    @Remark NOT LIKE '%Flood%' OR @Remark NOT LIKE '%Storm%' OR @Remark NOT LIKE '%Typhoon%' OR @Remark NOT LIKE '%Water%Damage' OR @Remark NOT LIKE '%FSTWD%' OR
+    @Remark NOT LIKE '%EQ%' OR @Remark NOT LIKE '%Earthquake%' OR @Remark NOT LIKE '%Volanic%Eruption' OR @Remark NOT LIKE '%Trunami%' OR @Remark NOT LIKE '%EQVET%' OR
+    @Remark NOT LIKE '%Riot%' OR @Remark NOT LIKE '%Strike%' OR @Remark NOT LIKE '%Malicious%Damage' OR @Remark NOT LIKE '%RSMD%' OR @Remark NOT LIKE '%4.1%' OR
+    @Remark NOT LIKE '%Civil%Commotion' OR @Remark NOT LIKE '%Terorism%' OR @Remark NOT LIKE '%Sabotage%' OR @Remark NOT LIKE '%Vehicle%Impact' OR @Remark NOT LIKE '%Impact%Vehicle%' OR
+    @Remark NOT LIKE '%Electrical' OR @Remark NOT LIKE '%Short%Circuit' OR @Remark NOT LIKE '%Landslide%' OR @Remark NOT LIKE '%Subsidence%' OR @Remark NOT LIKE '%Collapse%' OR
+    @Remark NOT LIKE '%Burglary%' OR @Remark NOT LIKE '%Theft%') OR @Remark LIKE '%Others%'
+	SELECT @ResultWord = 'Z'
+    
+	Select @Word=@ResultWord
+
+    FETCH NEXT FROM COL_Cursor into @COL, @Remark
+ End    
+ Close COL_Cursor    
+ Deallocate COL_Cursor    
+ Return (@Word)    
+End 
+
+
+ GO 
+
+
+Create Function [dbo].[R_PMK10_2014_GeneralTable](@P_FLDID as varchar(10), @P_VALUEID as varchar(20),@P_PFLDID AS VARCHAR(10))
+RETURNS varchar(255)
+With SchemaBinding
+AS    
+BEGIN    
+ Declare @ValueID as varchar(255)
+
+ DECLARE GeneralTable_Cursor CURSOR FOR    
+	Select  
+	CASE 
+	WHEN GENDTAB.FLDID1=@P_PFLDID THEN GENDTAB.VALUEDESC1
+	WHEN GENDTAB.FLDID2=@P_PFLDID THEN GENDTAB.VALUEDESC2
+	WHEN GENDTAB.FLDID3=@P_PFLDID THEN GENDTAB.VALUEDESC3
+	WHEN GENDTAB.FLDID4=@P_PFLDID THEN GENDTAB.VALUEDESC4
+	WHEN GENDTAB.FLDID5=@P_PFLDID THEN GENDTAB.VALUEDESC5
+	WHEN GENDTAB.FLDID6=@P_PFLDID THEN GENDTAB.VALUEDESC6
+	WHEN GENDTAB.FLDID7=@P_PFLDID THEN GENDTAB.VALUEDESC7
+	WHEN GENDTAB.FLDID8=@P_PFLDID THEN GENDTAB.VALUEDESC8
+	WHEN GENDTAB.FLDID9=@P_PFLDID THEN GENDTAB.VALUEDESC9
+	WHEN GENDTAB.FLDID10=@P_PFLDID THEN GENDTAB.VALUEDESC10
+	WHEN GENDTAB.FLDID11=@P_PFLDID THEN GENDTAB.VALUEDESC11
+	WHEN GENDTAB.FLDID12=@P_PFLDID THEN GENDTAB.VALUEDESC12
+	WHEN GENDTAB.FLDID13=@P_PFLDID THEN GENDTAB.VALUEDESC13
+	WHEN GENDTAB.FLDID14=@P_PFLDID THEN GENDTAB.VALUEDESC14
+	WHEN GENDTAB.FLDID15=@P_PFLDID THEN GENDTAB.VALUEDESC15
+	END AS VALUEID
+	from DBO.GENDTAB GENDTAB
+	Where GENDTAB.FLDID=@P_FLDID AND GENDTAB.VALUEID=@P_VALUEID
+  
+ OPEN GeneralTable_Cursor    
+ FETCH FROM GeneralTable_Cursor into @ValueID
+ Close GeneralTable_Cursor    
+ Deallocate GeneralTable_Cursor    
+ Return (@ValueID)    
+End 
+
+
+
+
+ GO 
+
+
+CREATE VIEW vPolicyData    
+AS          
+SELECT ACCEPTANCE.ANO, COVER.TOC AS TOC, COVER.INSURED AS Insured, ACCEPTANCE.AName AS AName, COVER.COVERNO, ACCEPTANCE.REGNO, ACCEPTANCE.POLICYNO AS PolicyNo, ACCEPTANCE.CERTIFICATENO AS CertificateNo, ACCEPTANCE.REFNO, Acceptance.PDate, Acceptance.PPDate,     
+AINFO.VALUEID1, AINFO.VALUEDESC1,    
+AINFO.VALUEID2, AINFO.VALUEDESC2,    
+AINFO.VALUEID3, AINFO.VALUEDESC3,    
+AINFO.VALUEID4, AINFO.VALUEDESC4,    
+AINFO.VALUEID5, AINFO.VALUEDESC5,    
+AINFO.VALUEID6, AINFO.VALUEDESC6,    
+AINFO.VALUEID7, AINFO.VALUEDESC7,    
+AINFO.VALUEID8, AINFO.VALUEDESC8,    
+AINFO.VALUEID9, AINFO.VALUEDESC9,    
+AINFO.VALUEID10, AINFO.VALUEDESC10,    
+AINFO.VALUEID11, AINFO.VALUEDESC11,    
+AINFO.VALUEID12, AINFO.VALUEDESC12,    
+AINFO.VALUEID13, AINFO.VALUEDESC13,    
+AINFO.VALUEID14, AINFO.VALUEDESC14,    
+AINFO.VALUEID15, AINFO.VALUEDESC15    
+FROM DBO.COVER as COVER INNER JOIN  DBO.ACCEPTANCE ACCEPTANCE ON COVER.CNO = ACCEPTANCE.CNO INNER JOIN  DBO.AINFO AINFO ON ACCEPTANCE.ANO = AINFO.ANO          
+WHERE (ACCEPTANCE.ANO <> ACCEPTANCE.LANO) AND (ACCEPTANCE.ATYPE NOT IN ('C', 'A')) AND (ACCEPTANCE.ASTATUS NOT IN ('W','T')) AND NOT (COVER.CSTATUS='C' AND ACCEPTANCE.ASTATUS='C') AND datediff(day, ACCEPTANCE.PDATE,ACCEPTANCE.PPDATE)>0 AND ACCEPTANCE.POLICYNO<>''              
+
+ GO 
+Create View vProfile
+WITH SCHEMABINDING
+AS
+select 
+	Profile.ID
+	,Profile.Salutation
+	,Profile.FirstName
+	,Profile.MidName
+	,Profile.LastName
+	,Profile.Name
+	,Profile.Initial
+	,Profile.Address_1
+	,Profile.Address_2
+	,Profile.Address_3
+	,Profile.City
+	,Profile.ZipCode
+	,Profile.Phone_1
+	,Profile.Phone_2
+	,Profile.Mobile_1
+	,Profile.Mobile_2
+	,Profile.Fax_1
+	,Profile.Fax_2
+	,Profile.Contact
+	,Profile.ContactAddress
+	,Profile.ContactPhone
+	,Profile.Title
+	,Profile.PTYPE
+	,Profile.RefID
+	,dbo.fn_DECRYPTTEXT(SysTab.EncryptionPassPhrase,Profile.TaxID) as TaxID
+	,dbo.fn_DECRYPTTEXT(SysTab.EncryptionPassPhrase,Profile.Email) as Email
+	,dbo.fn_DECRYPTTEXT(SysTab.EncryptionPassPhrase,Profile.Email_2) as Email_2
+	,Profile.TaxName
+	,Profile.TaxAddress
+	,Profile.VatF
+	,Profile.TaxF
+	,Profile.LOB
+	,Profile.Country
+	,Profile.CorporateF
+	,Profile.IntermediaryF
+	,Profile.Rating
+	,Profile.CGroup
+	,Profile.SCGroup
+	,Profile.Area
+	,Profile.TaxType
+	,Profile.VAT
+	,Profile.TAX
+	,Profile.TAXPCT
+	,Profile.NTAXINCOME
+	,Profile.LAST_OPR
+	,Profile.LAST_UPDATE
+	,Profile.PID
+	,Profile.COMM
+	,Profile.Disc
+	,Profile.RESTRICTEDF
+	,Profile.PREFERREDF
+	,Profile.REMARK
+	,Profile.CTYPE
+	,Profile.ProviderF
+	,Profile.RedFlag
+	,Profile.RedFlagDate
+	,Profile.RedFlagTime
+	,Profile.RedFlagDescription
+	,Profile.RedFlagUser
+	,Profile.DumpF
+	,dbo.fn_DECRYPTTEXT(SysTab.EncryptionPassPhrase,Profile.USERID) as USERID
+	,Profile.CDATE
+	,Profile.ASource
+	,Profile.Owner
+	,Profile.WPC
+	,Profile.Grace
+	,Profile.Branch
+	,Profile.NetCommF
+	,Profile.MaxOutGo
+	,Profile.LicenseNo
+	,Profile.TPAF
+	,Profile.Province
+	,Profile.XProfileID
+	,Profile.ICPSF
+	,Profile.RType
+	,Profile.LicenseDate
+	,Profile.LicenseExpiry
+	,Profile.ContactTitle
+	,Profile.TAXHSDate
+	,Profile.TAXHEDate
+	,Profile.MOID
+	,Profile.HSCode
+	,Profile.BIType
+	,Profile.AccruedTax
+	,Profile.Last_Time
+	,Profile.Regency
+	,Profile.SubsidiaryF
+	,Profile.Latitude
+	,Profile.Longtitude
+	,Profile.District
+	,Profile.SubDistrict
+	,Profile.RoomNo
+	,Profile.FloorNo
+	,Profile.HomeNo
+	,Profile.MOO
+	,Profile.SOI
+	,Profile.Village
+	,Profile.Building
+	,Profile.Road
+	,Profile.SyncDate
+	,Profile.SyncTime
+	,Profile.SYNCERRORMESSAGE
+	,Profile.BVATF
+	,Profile.TVATF
+	,Profile.RestrictedDate
+	,Profile.RestrictedTime
+	,Profile.RestrictedUser
+	--,Profile.OJKRegion
+	--,Profile.OJKSchemeNo
+	,Profile.PrivilegeType
+	,Profile.DeferralF
+	,Profile.VerifiedBy
+	,Profile.VerifiedDate
+	,Profile.VerifiedTime
+	,Profile.VATOLD
+	,Profile.VATSubsidiesF
+	,Profile.VATESDate
+	,Profile.VATEEDate
+	,Profile.CBRAID
+	,Profile.CBRADATE
+	,Profile.CBRANRDATE
+	,Profile.ConsentOnDataKeepByCompanyF
+	,Profile.ConsentOnDataPrivacyToThirdPartyF
+	,Profile.ConsentOnProductAndServiceOfferingF
+	,Profile.VerifiedF
+	,Profile.AccruedVAT
+	,Profile.TAXIDOLD
+	,Profile.Email_3
+	,Profile.VATCOMMEXEMPTIF
+from dbo.Profile Profile
+Inner Join dbo.SysTab SysTab on (1=1)
+
+
+ GO 
+
+
+CREATE VIEW VQuotationData 
+AS        
+SELECT ACCEPTANCE.ANO, COVER.TOC AS TOC, COVER.INSURED AS Insured, ACCEPTANCE.AName AS AName, COVER.COVERNO, ACCEPTANCE.REGNO, ACCEPTANCE.POLICYNO AS PolicyNo, ACCEPTANCE.CERTIFICATENO AS CertificateNo, ACCEPTANCE.REFNO, Acceptance.PDate, Acceptance.PPDate,   
+AINFO.VALUEID1, AINFO.VALUEDESC1,  
+AINFO.VALUEID2, AINFO.VALUEDESC2,  
+AINFO.VALUEID3, AINFO.VALUEDESC3,  
+AINFO.VALUEID4, AINFO.VALUEDESC4,  
+AINFO.VALUEID5, AINFO.VALUEDESC5,  
+AINFO.VALUEID6, AINFO.VALUEDESC6,  
+AINFO.VALUEID7, AINFO.VALUEDESC7,  
+AINFO.VALUEID8, AINFO.VALUEDESC8,  
+AINFO.VALUEID9, AINFO.VALUEDESC9,  
+AINFO.VALUEID10, AINFO.VALUEDESC10,  
+AINFO.VALUEID11, AINFO.VALUEDESC11,  
+AINFO.VALUEID12, AINFO.VALUEDESC12,  
+AINFO.VALUEID13, AINFO.VALUEDESC13,  
+AINFO.VALUEID14, AINFO.VALUEDESC14,  
+AINFO.VALUEID15, AINFO.VALUEDESC15  
+FROM DBO.COVER as COVER 
+INNER JOIN  DBO.ACCEPTANCE ACCEPTANCE ON COVER.CNO = ACCEPTANCE.CNO 
+INNER JOIN  DBO.RARRHEADER RARRHEADER ON (RARRHEADER.ANO=ACCEPTANCE.ANO)
+INNER JOIN  DBO.AINFO AINFO ON ACCEPTANCE.ANO = AINFO.ANO        
+WHERE (ACCEPTANCE.ANO <> ACCEPTANCE.LANO) AND RARRHEADER.STATUS='A' AND COVER.CSTATUS NOT IN ('C') AND datediff(day, ACCEPTANCE.PDATE,ACCEPTANCE.PPDATE)>0 
+
+ GO

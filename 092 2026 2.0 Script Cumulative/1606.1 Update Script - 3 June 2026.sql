@@ -1,0 +1,23 @@
+/* To prevent any potential data loss issues, you should review this script in detail before running it outside the context of the database designer.*/
+BEGIN TRANSACTION
+SET QUOTED_IDENTIFIER ON
+SET ARITHABORT ON
+SET NUMERIC_ROUNDABORT OFF
+SET CONCAT_NULL_YIELDS_NULL ON
+SET ANSI_NULLS ON
+SET ANSI_PADDING ON
+SET ANSI_WARNINGS ON
+COMMIT
+BEGIN TRANSACTION
+GO
+IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = N'MasterF' AND Object_ID = Object_ID(N'dbo.ACCEPTANCE'))
+BEGIN
+    ALTER TABLE dbo.ACCEPTANCE ADD MasterF bit NULL
+END
+GO
+DECLARE @v sql_variant 
+SET @v = N'Master Policy (1 : Yes, 0 : Transaction Policy/Certificate)'
+EXECUTE sp_addextendedproperty N'MS_Description', @v, N'SCHEMA', N'dbo', N'TABLE', N'ACCEPTANCE', N'COLUMN', N'MasterF'
+GO
+
+COMMIT

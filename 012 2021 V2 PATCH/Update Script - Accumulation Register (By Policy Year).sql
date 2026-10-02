@@ -1,0 +1,563 @@
+DROP PROCEDURE QAccumulation
+GO
+CREATE PROCEDURE QAccumulation (@P_REGID as varchar(10), @P_FLDID as varchar(255), @P_VALUEID as varchar(255), @P_RTYPE as varchar(10),@P_RYear as Int=0)        
+AS        
+Declare @P_Amount as float      
+Declare @P_TSI as float      
+Declare @P_REALLOCF as bit      
+    
+if @P_FLDID<>'' and @P_VALUEID<>''     
+Begin    
+ SELECT @P_Amount=SUM(AMOUNT), @P_TSI=SUM(TSI), @P_RYear=MAX(RYEAR), @P_REALLOCF=MAX(Cast(REALLOCF as int))      
+ From AccRegDet        
+ WHERE ACCREGDET.REGID=@P_REGID AND ACCREGDET.FLDID=@P_FLDID AND ACCREGDET.VALUEID=@P_VALUEID AND ACCREGDET.RTYPE=@P_RTYPE AND ACCREGDET.TSI<>0 AND (ACCREGDET.RYEAR=@P_RYEAR OR @P_RYEAR=0)
+End       
+Select @P_Amount as Amount , @P_TSI as TSI, @P_RYear as RYear, @P_REALLOCF as REALLOCF  
+
+GO
+
+DROP FUNCTION FN_PCalc 
+GO
+Create FUNCTION FN_PCalc (@P_ANO as integer)            
+RETURNS Table            
+AS RETURN (            
+SELECT  Acceptance.ANO,            
+ Count(PCalc.Currency) AS NUMCCY,          
+ MAX(PCALC.LMFACTOR) AS LMFACTOR,
+ MAX(PCALC.RATE) AS RATE,          
+ MAX(PCALC.CRATE) AS CRATE,         
+ MAX(CASE When Acceptance.QTY=0 Then 1 Else Acceptance.QTY end) as NumRisk,
+ sum(PCalc.TSI*PCalc.Rate*Case When Acceptance.QTY=0 Then 1 Else Acceptance.QTY end) AS TSI,            
+ sum(PCalc.OurShare*PCalc.Rate*Case When Acceptance.QTY=0 Then 1 Else Acceptance.QTY end) AS OurShare,            
+ sum(PCalc.Amount*PCalc.Rate*Case When Acceptance.QTY=0 Then 1 Else Acceptance.QTY end) AS Amount,            
+ sum(PCalc.Gross*PCalc.Rate*Case When Acceptance.QTY=0 Then 1 Else Acceptance.QTY end) AS Gross,            
+ sum(PCalc.OGross*PCalc.Rate*Case When Acceptance.QTY=0 Then 1 Else Acceptance.QTY end/dbo.fn_Premium_Calc_Prorata(Acceptance.Sdate, case When Acceptance.EXCLUSIVEF=0 and Acceptance.STime<Acceptance.STime Then dateadd(day,1,Acceptance.EDate) else Acceptance.EDate End,Cover.Prorata, 12,CASE WHEN Cover.PPeriod in (0,1,2) Then 2 ELSE Cover.PPeriod END)) AS OGross,       
+ sum(PCalc.Claim*PCalc.Rate*Case When Acceptance.QTY=0 Then 1 Else Acceptance.QTY end) AS Claim,            
+ sum(case when PCalc.TSI=0 then 0 else PCalc.OurShare*PCalc.Rate*Case When Acceptance.QTY=0 Then 1 Else Acceptance.QTY end end)/            
+ sum(case when PCalc.TSI=0 then 1 else PCalc.TSI*PCalc.Rate*Case When Acceptance.QTY=0 Then 1 Else Acceptance.QTY end end)*            
+ sum(PCalc.Gross*PCalc.Rate*Case When Acceptance.QTY=0 Then 1 Else Acceptance.QTY end) as Premium,            
+ MAX(CASE WHEN PCALC.TSI<>0 AND COALESCE(ISOURCE.LIMIT,0)<>0 THEN PCALC.OURSHARE/PCALC.TSI*100 ELSE COALESCE(ISOURCE.SHARE,100) END) as PCTSHARE, 
+ MAX(RARRHEADER.MSHARE) as MSHARE,
+ MAX(YEAR(RARRHEADER.RDATE)) as RYEAR
+FROM  Acceptance with(NOLOCK)       
+INNER JOIN COVER with(NOLOCK) ON (COVER.CNO=ACCEPTANCE.CNO)
+LEFT JOIN Pcalc with(NOLOCK) ON (Acceptance.ANO=PCalc.ANO and Acceptance.PStatus='C')       
+LEFT JOIN RArrHeader with(NOLOCK) On (RArrHeader.ANO=Acceptance.ANO)      
+LEFT JOIN ISOURCE with (NOLOCK) ON (ISOURCE.CNO=ACCEPTANCE.CNO)            
+Where Acceptance.ANO=@P_ANO            
+GROUP BY Acceptance.ANO            
+)            
+
+
+GO
+
+IF EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'QAccumulation_Detail') AND type IN ( N'FN', N'IF', N'TF', N'FS', N'FT' ) ) 
+begin
+DROP FUNCTION QAccumulation_Detail
+end
+GO
+CREATE Function QAccumulation_Detail(@P_REGID as varchar(10), @P_FLDID as varchar(255), @P_VALUEID as varchar(255), @P_RYear as Int)        
+RETURNS Table  
+AS RETURN (  
+Select A1.ANO, A1.LANO, A1.RegNo, A1.RefNo, A1.Branch, A1.AStatus, A1.AType, A1.TOC, C.OpenFlag, A1.PolicyNo, A1.CertificateNo, A1.ValueDesc, A1.SDate, A1.EDate, A1.PDate, A1.AName, R1.ManualF
+from Acceptance A1
+Inner Join Cover C on (C.CNO=A1.CNO)
+Inner Join RArrHeader R1 on (R1.ANO=A1.ANO)
+Where A1.ANO<>A1.LANO and R1.ANO=A1.ANO and R1.Status='A' 
+and A1.RegID=@P_REGID and A1.FLDID=@P_FLDID and A1.VALUEID=@P_VALUEID and (@P_RYear=0 or YEAR(R1.RDATE)=@P_RYear)
+)
+
+GO
+
+DROP FUNCTION QACCUMULATION_CONTROL
+GO
+CREATE FUNCTION QACCUMULATION_CONTROL(@P_REGID as varchar(10), @P_FLDID as varchar(255), @P_VALUEID as varchar(255), @P_RYear as Int)        
+RETURNS Table  
+AS RETURN (  
+SELECT G1.SFLDID, G1.SVALUEID, Max(G2.Description) as Description, sum(R1.TAmount) as TSI  
+from acceptance a1, RArrheader R1, GenDTab G1, GenDTab G2
+Where A1.RegID=@P_RegID and A1.FLDID=@P_FLDID and A1.VALUEID=@P_VALUEID and (@P_RYear=0 or YEAR(R1.RDATE)=@P_RYear) and R1.ANO=A1.ANO and R1.Status='A' and G1.FLDID=A1.FLDID and G1.VALUEID=A1.VALUEID and G2.FLDID=G1.SFLDID and G2.VALUEID=G1.SVALUEID  
+Group By G1.SFLDID, G1.SVALUEID
+)  
+GO
+
+DROP PROCEDURE QAccReg
+GO
+CREATE PROCEDURE QAccReg(@P_PANO as Integer) 
+AS 
+SELECT ACCEPTANCE.REGID, ACCEPTANCE.FLDID, ACCEPTANCE.VALUEID, ACCEPTANCE.ATYPE, ACCEPTANCE.ASTATUS, ACCEPTANCE.PANO, ACCEPTANCE.AnnualTreatyF, ACCEPTANCE.NORISKACCUMULATIONF, YEAR(RARRHEADER.RDATE) as RYEAR
+FROM ACCEPTANCE, RARRHEADER
+WHERE ACCEPTANCE.ANO=@P_PANO AND RARRHEADER.ANO=ACCEPTANCE.ANO 
+ 
+GO
+
+DROP PROCEDURE Treaty_Adjustment_Detail
+GO
+CREATE PROCEDURE Treaty_Adjustment_Detail (@P_ADATE as smallDatetime, @P_REGID as varchar(10), @P_FLDID as varchar(255), @P_VALUEID as varchar(255), @P_RYEAR as integer)
+AS
+SELECT ACCEPTANCE.ANO, RARRHEADER.STATUS, ACCEPTANCE.ASTATUS, ACCEPTANCE.ADATE
+From acceptance, RARRHEADER
+WHERE ACCEPTANCE.REGID=@P_REGID AND ACCEPTANCE.FLDID=@P_FLDID And ACCEPTANCE.VALUEID=@P_VALUEID And ACCEPTANCE.ANO=RARRHEADER.ANO And YEAR(RARRHEADER.RDATE)=@P_RYEAR And ACCEPTANCE.ASTATUS='W' AND RARRHEADER.STATUS='A'
+    
+GO  
+
+
+DROP PROCEDURE TREATY_ADJUSTMENT_LIMIT 
+GO
+CREATE PROCEDURE TREATY_ADJUSTMENT_LIMIT (@P_REGID as varchar(10), @P_FLDID as varchar(255), @P_VALUEID as varchar(255), @P_RYEAR as integer=0)      
+AS      
+Select MIN(RARRHEADER.LIMIT) AS LIMIT, MAX(YEAR(RARRHEADER.RDATE)) as RYEAR    
+From RARRHEADER, acceptance
+WHERE RARRHEADER.STATUS='A' AND RARRHEADER.ANO=ACCEPTANCE.ANO AND ACCEPTANCE.ASTATUS='W' and ACCEPTANCE.REGID=@P_REGID AND ACCEPTANCE.FLDID=@P_FLDID AND ACCEPTANCE.VALUEID=@P_VALUEID      
+and (@P_RYEAR=0 or Year(RARRHeader.RDate)=@P_RYear)
+        
+    
+GO
+
+DROP Procedure Treaty_Adjustment_Q
+GO
+CREATE Procedure Treaty_Adjustment_Q(@P_ADATE smalldatetime, @P_REGID varchar(10), @P_FLDID varchar ( 255 ), @P_VALUEID varchar ( 255 ), @P_RYEAR as integer=0)    
+as    
+SELECT YEAR(RARRHEADER.RDATE) AS RYEAR,     
+SUM((RArrHeader.TAmount-RArrHeader.FAmount)-RARRHEADER.MAMOUNT) AS SI,    
+MIN(CASE WHEN RECLASS.CESSIONF=1 THEN 1 ELSE 0 END) AS CLIMIT,    
+MIN(CASE WHEN RECLASS.ASSESSMENTF=1 THEN 1 ELSE 0 END) AS RLIMIT,    
+MIN(CASE WHEN RECLASS.LIMIT<>0 THEN RECLASS.LIMIT ELSE REINSURANCE.LIMIT END) AS LIMIT,    
+MIN(RECLASS.PLIMIT) as PLIMIT,  
+SUM((RARRHEADER.QAMOUNT+RARRHEADER.QSRAMOUNT)) as REGAMOUNT,
+SUM((RARRHEADER.QAMOUNT+RARRHEADER.QSRAMOUNT)/(CASE WHEN RECLASS.CESSIONF=1 THEN RARRHEADER.CLIMIT ELSE 1 END)) as AMOUNT    
+From RARRHEADER, acceptance, REINSURANCE, cover, RECLASS    
+WHERE COVER.CNO=ACCEPTANCE.CNO AND RECLASS.TOC=ACCEPTANCE.TOC AND RECLASS.RNO=REINSURANCE.RNO AND    
+ACCEPTANCE.REGID=@P_REGID AND ACCEPTANCE.FLDID=@P_FLDID And ACCEPTANCE.VALUEID=@P_VALUEID And ACCEPTANCE.ANO=RARRHEADER.ANO and ACCEPTANCE.ASTATUS='W' and RArrHeader.Status='A' And REINSURANCE.RID=RARRHEADER.QID    
+And (CASE WHEN RECLASS.CESSIONF=1 THEN RARRHEADER.CLIMIT ELSE 1 END)<>0  
+and (@P_RYEAR=0 or Year(RARRHeader.RDate)=@P_RYear)
+GROUP BY YEAR(RARRHEADER.RDATE)    
+ORDER BY MIN(CASE WHEN RECLASS.LIMIT<>0 THEN RECLASS.LIMIT ELSE REINSURANCE.LIMIT END) DESC    
+
+
+GO
+
+DROP Procedure Treaty_Adjustment_A
+GO
+CREATE Procedure Treaty_Adjustment_A(@P_ADATE smalldatetime, @P_REGID varchar(10), @P_FLDID varchar ( 255 ), @P_VALUEID varchar ( 255 ), @P_RYEAR as integer=0)    
+as    
+SELECT YEAR(RARRHEADER.RDATE) AS RYEAR,     
+SUM((RArrHeader.TAmount-RArrHeader.FAmount)-RARRHEADER.MAMOUNT) AS SI,    
+MIN(CASE WHEN RECLASS.CESSIONF=1 THEN 1 ELSE 0 END) AS CLIMIT,    
+MIN(CASE WHEN RECLASS.ASSESSMENTF=1 THEN 1 ELSE 0 END) AS RLIMIT,    
+MIN(CASE WHEN RECLASS.LIMIT<>0 THEN RECLASS.LIMIT ELSE REINSURANCE.LIMIT END) AS LIMIT,    
+MIN(RECLASS.PLIMIT) as PLIMIT,  
+SUM((RARRHEADER.AAMOUNT)) as REGAMOUNT,
+SUM((RARRHEADER.AAMOUNT)/(CASE WHEN RECLASS.CESSIONF=1 THEN RARRHEADER.CLIMIT ELSE 1 END)) as AMOUNT    
+From RARRHEADER, acceptance, REINSURANCE, cover, RECLASS    
+WHERE COVER.CNO=ACCEPTANCE.CNO AND RECLASS.TOC=ACCEPTANCE.TOC AND RECLASS.RNO=REINSURANCE.RNO AND    
+ACCEPTANCE.REGID=@P_REGID AND  ACCEPTANCE.FLDID=@P_FLDID And ACCEPTANCE.VALUEID=@P_VALUEID And ACCEPTANCE.ANO=RARRHEADER.ANO and ACCEPTANCE.ASTATUS='W' and RArrHeader.Status='A' And REINSURANCE.RID=RARRHEADER.AID    
+And (CASE WHEN RECLASS.CESSIONF=1 THEN RARRHEADER.CLIMIT ELSE 1 END)<>0  
+and (@P_RYEAR=0 or Year(RARRHeader.RDate)=@P_RYear)
+GROUP BY YEAR(RARRHEADER.RDATE)    
+ORDER BY MIN(CASE WHEN RECLASS.LIMIT<>0 THEN RECLASS.LIMIT ELSE REINSURANCE.LIMIT END) DESC    
+    
+
+GO
+
+DROP Procedure Treaty_Adjustment_XP
+GO
+CREATE Procedure Treaty_Adjustment_XP(@P_ADATE smalldatetime, @P_REGID varchar(10), @P_FLDID varchar ( 255 ), @P_VALUEID varchar ( 255 ), @P_RYEAR as integer=0)      
+as      
+SELECT YEAR(RARRHEADER.RDATE) AS RYEAR,       
+SUM((RArrHeader.TAmount-RArrHeader.FAmount)/(RARRHEADER.PCTShare/100)) AS SI,      
+MIN(0) AS RLIMIT,      
+MIN(0) AS CLIMIT,      
+MIN(CASE WHEN RECLASS.LIMIT<>0 THEN RECLASS.LIMIT ELSE REINSURANCE.LIMIT END*CASE WHEN Cover.ISType<>'R' and Cover.ISType<>'T' Then 1 Else 0 End) AS LIMIT,      
+MIN(RECLASS.PLIMIT) as PLIMIT,  
+SUM(RARRHEADER.XPAmount / (RARRHEADER.PctShare / 100 * RARRHEADER.PCTLOSS/100 * (100 - RARRHEADER.MShare) / 100)) As REGAMOUNT,
+SUM(RARRHEADER.XPAmount / (RARRHEADER.PctShare / 100 * RARRHEADER.PCTLOSS/100 * (100 - RARRHEADER.MShare) / 100)) As Amount      
+FROM RARRHEADER, ACCEPTANCE, REINSURANCE, RECLASS, COVER LEFT JOIN ISOURCE ON (ISOURCE.CNO=COVER.CNO)      
+WHERE COVER.CNO=ACCEPTANCE.CNO AND RECLASS.TOC=ACCEPTANCE.TOC AND RECLASS.RNO=REINSURANCE.RNO AND      
+ACCEPTANCE.REGID=@P_REGID AND ACCEPTANCE.FLDID=@P_FLDID And ACCEPTANCE.VALUEID=@P_VALUEID And ACCEPTANCE.ANO=RARRHEADER.ANO and ACCEPTANCE.ASTATUS='W' and RArrHeader.Status='A' And REINSURANCE.RID=RARRHEADER.XPID      
+AND RARRHEADER.PCTShare<>0    
+and (@P_RYEAR=0 or Year(RARRHeader.RDate)=@P_RYear)
+GROUP BY YEAR(RARRHEADER.RDATE)      
+ORDER BY MIN(CASE WHEN RECLASS.LIMIT<>0 THEN RECLASS.LIMIT ELSE REINSURANCE.LIMIT END*CASE WHEN Cover.ISType<>'R' and Cover.ISType<>'T' Then 1 Else 0 End) DESC      
+
+GO
+
+DROP Procedure Treaty_Adjustment_S1
+GO
+CREATE Procedure Treaty_Adjustment_S1(@P_ADATE smalldatetime, @P_REGID varchar(10), @P_FLDID varchar ( 255 ), @P_VALUEID varchar ( 255 ), @P_RYEAR as integer=0)    
+as    
+SELECT YEAR(RARRHEADER.RDATE) AS RYEAR,     
+SUM((RArrHeader.TAmount-RArrHeader.FAmount)-RARRHEADER.MAMOUNT) AS SI,    
+MIN(CASE WHEN RECLASS.CESSIONF=1 THEN 1 ELSE 0 END) AS CLIMIT,    
+MIN(CASE WHEN RECLASS.ASSESSMENTF=1 THEN 1 ELSE 0 END) AS RLIMIT,    
+MIN(CASE WHEN RECLASS.LIMIT<>0 THEN RECLASS.LIMIT ELSE REINSURANCE.LIMIT END) AS LIMIT,    
+MIN(RECLASS.PLIMIT) as PLIMIT,  
+SUM((RARRHEADER.SP1AMOUNT)) as REGAMOUNT,
+SUM((RARRHEADER.SP1AMOUNT)/(CASE WHEN RECLASS.CESSIONF=1 THEN RARRHEADER.CLIMIT ELSE 1 END)) as AMOUNT    
+From RARRHEADER, acceptance, REINSURANCE, cover, RECLASS    
+WHERE COVER.CNO=ACCEPTANCE.CNO AND RECLASS.TOC=ACCEPTANCE.TOC AND RECLASS.RNO=REINSURANCE.RNO AND    
+ACCEPTANCE.REGID=@P_REGID AND ACCEPTANCE.FLDID=@P_FLDID And ACCEPTANCE.VALUEID=@P_VALUEID And ACCEPTANCE.ANO=RARRHEADER.ANO and ACCEPTANCE.ASTATUS='W' and RArrHeader.Status='A' And REINSURANCE.RID=RARRHEADER.SP1ID    
+And (CASE WHEN RECLASS.CESSIONF=1 THEN RARRHEADER.CLIMIT ELSE 1 END)<>0  
+and (@P_RYEAR=0 or Year(RARRHeader.RDate)=@P_RYear)
+GROUP BY YEAR(RARRHEADER.RDATE)    
+ORDER BY MIN(CASE WHEN RECLASS.LIMIT<>0 THEN RECLASS.LIMIT ELSE REINSURANCE.LIMIT END) DESC    
+          
+
+GO
+
+DROP Procedure Treaty_Adjustment_S2
+GO
+CREATE Procedure Treaty_Adjustment_S2(@P_ADATE smalldatetime, @P_REGID varchar(10), @P_FLDID varchar ( 255 ), @P_VALUEID varchar ( 255 ), @P_RYEAR as integer=0)    
+as    
+SELECT YEAR(RARRHEADER.RDATE) AS RYEAR,     
+SUM((RArrHeader.TAmount-RArrHeader.FAmount)-RARRHEADER.MAMOUNT) AS SI,    
+MIN(CASE WHEN RECLASS.CESSIONF=1 THEN 1 ELSE 0 END) AS CLIMIT,    
+MIN(CASE WHEN RECLASS.ASSESSMENTF=1 THEN 1 ELSE 0 END) AS RLIMIT,    
+MIN(CASE WHEN RECLASS.LIMIT<>0 THEN RECLASS.LIMIT ELSE REINSURANCE.LIMIT END) AS LIMIT,    
+MIN(RECLASS.PLIMIT) as PLIMIT,  
+SUM((RARRHEADER.SP2AMOUNT)) as REGAMOUNT,
+SUM((RARRHEADER.SP2AMOUNT)/(CASE WHEN RECLASS.CESSIONF=1 THEN RARRHEADER.CLIMIT ELSE 1 END)) as AMOUNT    
+From RARRHEADER, acceptance, REINSURANCE, cover, RECLASS    
+WHERE COVER.CNO=ACCEPTANCE.CNO AND RECLASS.TOC=ACCEPTANCE.TOC AND RECLASS.RNO=REINSURANCE.RNO AND    
+ACCEPTANCE.REGID=@P_REGID AND ACCEPTANCE.FLDID=@P_FLDID And ACCEPTANCE.VALUEID=@P_VALUEID And ACCEPTANCE.ANO=RARRHEADER.ANO and ACCEPTANCE.ASTATUS='W' and RArrHeader.Status='A' And REINSURANCE.RID=RARRHEADER.SP2ID    
+And (CASE WHEN RECLASS.CESSIONF=1 THEN RARRHEADER.CLIMIT ELSE 1 END)<>0  
+and (@P_RYEAR=0 or Year(RARRHeader.RDate)=@P_RYear)
+GROUP BY YEAR(RARRHEADER.RDATE)    
+ORDER BY MIN(CASE WHEN RECLASS.LIMIT<>0 THEN RECLASS.LIMIT ELSE REINSURANCE.LIMIT END) DESC    
+
+
+GO
+
+DROP Procedure Treaty_Adjustment_S3
+GO
+CREATE Procedure Treaty_Adjustment_S3(@P_ADATE smalldatetime, @P_REGID varchar(10), @P_FLDID varchar ( 255 ), @P_VALUEID varchar ( 255 ), @P_RYEAR as integer=0)    
+as    
+SELECT YEAR(RARRHEADER.RDATE) AS RYEAR,     
+SUM((RArrHeader.TAmount-RArrHeader.FAmount)-RARRHEADER.MAMOUNT) AS SI,    
+MIN(CASE WHEN RECLASS.CESSIONF=1 THEN 1 ELSE 0 END) AS CLIMIT,    
+MIN(CASE WHEN RECLASS.ASSESSMENTF=1 THEN 1 ELSE 0 END) AS RLIMIT,    
+MIN(CASE WHEN RECLASS.LIMIT<>0 THEN RECLASS.LIMIT ELSE REINSURANCE.LIMIT END) AS LIMIT,    
+MIN(RECLASS.PLIMIT) as PLIMIT,  
+SUM((RARRHEADER.SP3AMOUNT)) as REGAMOUNT,
+SUM((RARRHEADER.SP3AMOUNT)/(CASE WHEN RECLASS.CESSIONF=1 THEN RARRHEADER.CLIMIT ELSE 1 END)) as AMOUNT    
+From RARRHEADER, acceptance, REINSURANCE, cover, RECLASS    
+WHERE COVER.CNO=ACCEPTANCE.CNO AND RECLASS.TOC=ACCEPTANCE.TOC AND RECLASS.RNO=REINSURANCE.RNO AND    
+ACCEPTANCE.REGID=@P_REGID AND ACCEPTANCE.FLDID=@P_FLDID And ACCEPTANCE.VALUEID=@P_VALUEID And ACCEPTANCE.ANO=RARRHEADER.ANO and ACCEPTANCE.ASTATUS='W' and RArrHeader.Status='A' And REINSURANCE.RID=RARRHEADER.SP3ID    
+And (CASE WHEN RECLASS.CESSIONF=1 THEN RARRHEADER.CLIMIT ELSE 1 END)<>0  
+and (@P_RYEAR=0 or Year(RARRHeader.RDate)=@P_RYear)
+GROUP BY YEAR(RARRHEADER.RDATE)    
+ORDER BY MIN(CASE WHEN RECLASS.LIMIT<>0 THEN RECLASS.LIMIT ELSE REINSURANCE.LIMIT END) DESC    
+
+
+GO
+
+DROP Procedure Treaty_Adjustment_D
+GO
+CREATE Procedure Treaty_Adjustment_D(@P_ADATE smalldatetime, @P_REGID varchar(10), @P_FLDID varchar ( 255 ), @P_VALUEID varchar ( 255 ), @P_RYEAR as integer=0)    
+as    
+SELECT YEAR(RARRHEADER.RDATE) AS RYEAR,     
+SUM((RArrHeader.TAmount-RArrHeader.FAmount)-RARRHEADER.MAMOUNT) AS SI,    
+MIN(CASE WHEN RECLASS.CESSIONF=1 THEN 1 ELSE 0 END) AS CLIMIT,    
+MIN(CASE WHEN RECLASS.ASSESSMENTF=1 THEN 1 ELSE 0 END) AS RLIMIT,    
+MIN(CASE WHEN RECLASS.LIMIT<>0 THEN RECLASS.LIMIT ELSE REINSURANCE.LIMIT END) AS LIMIT,    
+MIN(RECLASS.PLIMIT) as PLIMIT,  
+SUM((RARRHEADER.DAMOUNT)) as REGAMOUNT,
+SUM((RARRHEADER.DAMOUNT)/(CASE WHEN RECLASS.CESSIONF=1 THEN RARRHEADER.CLIMIT ELSE 1 END)) as AMOUNT    
+From RARRHEADER, acceptance, REINSURANCE, cover, RECLASS    
+WHERE COVER.CNO=ACCEPTANCE.CNO AND RECLASS.TOC=ACCEPTANCE.TOC AND RECLASS.RNO=REINSURANCE.RNO AND    
+ACCEPTANCE.REGID=@P_REGID AND ACCEPTANCE.FLDID=@P_FLDID And ACCEPTANCE.VALUEID=@P_VALUEID And ACCEPTANCE.ANO=RARRHEADER.ANO and ACCEPTANCE.ASTATUS='W' and RArrHeader.Status='A' And REINSURANCE.RID=RARRHEADER.DID    
+And (CASE WHEN RECLASS.CESSIONF=1 THEN RARRHEADER.CLIMIT ELSE 1 END)<>0  
+and (@P_RYEAR=0 or Year(RARRHeader.RDate)=@P_RYear)
+GROUP BY YEAR(RARRHEADER.RDATE)    
+ORDER BY MIN(CASE WHEN RECLASS.LIMIT<>0 THEN RECLASS.LIMIT ELSE REINSURANCE.LIMIT END) DESC    
+
+
+GO
+
+DROP Procedure Treaty_Adjustment_C
+GO
+CREATE Procedure Treaty_Adjustment_C(@P_ADATE smalldatetime, @P_REGID varchar(10), @P_FLDID varchar ( 255 ), @P_VALUEID varchar ( 255 ), @P_RYEAR as integer=0)      
+as      
+SELECT YEAR(RARRHEADER.RDATE) AS RYEAR,       
+SUM((RArrHeader.TAmount-RArrHeader.FAmount)/(RARRHEADER.PCTShare/100)) AS SI,      
+MIN(0) AS RLIMIT,      
+MIN(0) AS CLIMIT,      
+MIN(CASE WHEN RECLASS.LIMIT<>0 THEN RECLASS.LIMIT ELSE REINSURANCE.LIMIT END*CASE WHEN Cover.ISType<>'R' and Cover.ISType<>'T' Then 1 Else 0 End) AS LIMIT,      
+MIN(RECLASS.PLIMIT) as PLIMIT,  
+SUM(RARRHEADER.CAmount / (RARRHEADER.PctShare / 100 * (100 - RARRHEADER.MShare) / 100)) As REGAmount,
+SUM(RARRHEADER.CAmount / (RARRHEADER.PctShare / 100 * (100 - RARRHEADER.MShare) / 100)) As Amount      
+FROM RARRHEADER, ACCEPTANCE, REINSURANCE, RECLASS, COVER LEFT JOIN ISOURCE ON (ISOURCE.CNO=COVER.CNO)      
+WHERE COVER.CNO=ACCEPTANCE.CNO AND RECLASS.TOC=ACCEPTANCE.TOC AND RECLASS.RNO=REINSURANCE.RNO AND      
+ACCEPTANCE.REGID=@P_REGID AND ACCEPTANCE.FLDID=@P_FLDID And ACCEPTANCE.VALUEID=@P_VALUEID And ACCEPTANCE.ANO=RARRHEADER.ANO and ACCEPTANCE.ASTATUS='W' and RArrHeader.Status='A' And REINSURANCE.RID=RARRHEADER.CID   
+AND RARRHEADER.PCTShare<>0    
+and (@P_RYEAR=0 or Year(RARRHeader.RDate)=@P_RYear)
+GROUP BY YEAR(RARRHEADER.RDATE)      
+ORDER BY MIN(CASE WHEN RECLASS.LIMIT<>0 THEN RECLASS.LIMIT ELSE REINSURANCE.LIMIT END*CASE WHEN Cover.ISType<>'R' and Cover.ISType<>'T' Then 1 Else 0 End) DESC      
+
+ 
+GO
+
+DROP PROCEDURE List11E
+GO
+
+CREATE PROCEDURE List11E(@P_SDate as smalldatetime, @P_EDate as smalldatetime,@P_RegID as varchar(10))
+AS
+SELECT Cast(0 as bit) as ProcessFlag, 
+ Cover.COVERNO,
+ Cast(Acceptance.AName as varchar(128)) as Insured,
+ Cover.CNO,
+ Cover.CStatus,
+ Acceptance.lANO,
+ Acceptance.ANO,
+ Acceptance.REGNO,
+ Acceptance.ADATE,
+ Acceptance.LUSERID as USERID,
+ SysTab.Currency,
+ (SELECT coalesce(SUM(PCALC.TSI*PCALC.RATE),0) FROM  PCALC WHERE PCALC.ANO=ACCEPTANCE.ANO AND ACCEPTANCE.PSTATUS='C')*CASE WHEN ACCEPTANCE.QTY=0 THEN 1 ELSE ACCEPTANCE.QTY END AS TSI,
+ (SELECT coalesce(SUM(PCALC.OURSHARE*PCALC.RATE),0) FROM  PCALC WHERE PCALC.ANO=ACCEPTANCE.ANO AND ACCEPTANCE.PSTATUS='C')*CASE WHEN ACCEPTANCE.QTY=0 THEN 1 ELSE ACCEPTANCE.QTY END AS OURSHARE, 
+ (SELECT coalesce(SUM(PCALC.GROSS*PCALC.RATE),0) FROM  PCALC WHERE PCALC.ANO=ACCEPTANCE.ANO AND ACCEPTANCE.PSTATUS='C')*CASE WHEN ACCEPTANCE.QTY=0 THEN 1 ELSE ACCEPTANCE.QTY END AS GROSS,
+ Acceptance.ASTATUS,
+ Acceptance.ATYPE,
+ Acceptance.SDate,
+ Acceptance.EDate,
+ Year(RArrheader.RDate) AS RYear,
+ Cover.ISType,
+ Acceptance.Renewal,
+ Acceptance.ESeqNo,
+ Acceptance.PolicyNo,
+ acceptance.CertificateNo
+FROM  Acceptance, Cover, SysTab, RArrHeader, AccRegDet
+Where cover.CNO = acceptance.CNO
+ And Acceptance.REGID=@P_REGID
+ And RArrHeader.ANO=Acceptance.ANO
+ And (Acceptance.ANO=Acceptance.LANO Or Acceptance.LANO=-1)
+ And Cover.CStatus<>'C'
+ And Acceptance.ADate Between @P_SDate and @P_EDate
+ And RArrHeader.Status<>'R' And RArrHeader.TAmount<>0
+ And Acceptance.AStatus in ('W','I')
+ And Cover.ISType<>'T'
+ And AccRegDet.RYear=Year(RArrHeader.RDate) and AccRegDet.RegID=Acceptance.RegID and AccRegDet.FLDID=Acceptance.FLDID and AccRegDet.VALUEID=Acceptance.ValueID and AccRegDet.TSI<>0 and RArrHeader.ManualF=0 and AccRegDet.ReAllocF=1
+ And ((Rarrheader.CID<>'' or RArrHeader.XPID<>'' or RArrheader.SP1ID<>'' or RArrHeader.SP2ID<>'' or RArrHeader.SP3ID<>'' or (RArrHeader.QID<>'' and RArrHeader.QSRet<>100)))
+                  
+Union
+                
+SELECT Cast(0 as bit) as ProcessFlag, 
+ Cover.COVERNO,
+ Cast(Acceptance.AName as varchar(128)) as Insured,
+ Cover.CNO,
+ Cover.CStatus,
+ Acceptance.lANO,
+ Acceptance.ANO,
+ Acceptance.REGNO,
+ Acceptance.ADATE,
+ Acceptance.LUSERID as USERID,
+ SysTab.Currency,
+ cast(0 as Float) as TSI,
+ cast(0 as Float) as OurShare,
+ cast(0 as Float) as Gross,
+ Acceptance.ASTATUS,
+ Acceptance.ATYPE,
+ Acceptance.SDate,
+ Acceptance.EDate,
+ Year(Acceptance.SDate) AS RYear,
+ Cover.ISType,
+ Acceptance.Renewal,
+ Acceptance.ESeqNo,
+ Acceptance.PolicyNo,
+ acceptance.CertificateNo
+FROM  Acceptance, Cover, SysTab, RArrHeader, Acceptance As Acceptance_Detail, AccRegDet
+Where cover.CNO = acceptance.CNO
+ And Acceptance.REGID=@P_REGID
+ And Acceptance.ANO=Acceptance_Detail.LANO  And Acceptance_Detail.LANO<>Acceptance_Detail.ANO
+ And RArrHeader.ANO=Acceptance_Detail.ANO
+ And Cover.CStatus<>'C'
+ And Acceptance_Detail.ADate Between @P_SDate and @P_EDate
+ And RArrHeader.Status<>'R' And RArrHeader.TAmount<>0
+ And Acceptance_Detail.AStatus in ('W','I')
+ And Cover.ISType<>'T'
+ And AccRegDet.RYear=Year(RArrHeader.RDate) and AccRegDet.RegID=Acceptance_Detail.RegID and AccRegDet.FLDID=Acceptance_Detail.FLDID and AccRegDet.VALUEID=Acceptance_Detail.ValueID and AccRegDet.TSI<>0 and RArrHeader.ManualF=0 and AccRegDet.ReAllocF=1
+ And ((Rarrheader.CID<>'' or RArrHeader.XPID<>'' or RArrheader.SP1ID<>'' or RArrHeader.SP2ID<>'' or RArrHeader.SP3ID<>'' or (RArrHeader.QID<>'' and RArrHeader.QSRet<>100)))
+
+
+
+GO
+
+
+DROP FUNCTION List11E_Det
+GO
+CREATE FUNCTION List11E_Det (@P_ANO as integer,@P_SDate as smalldatetime, @P_EDate as smalldatetime,@P_REGID as varchar(10))
+RETURNS Table
+AS RETURN(
+              
+SELECT Cast(0 as bit) as ProcessFlag,
+ Acceptance.CertificateNo,
+ Acceptance.ESeqNo,
+ Cast(Acceptance.AName as varchar(128)) as AName,
+ Acceptance.ANO,
+ Acceptance.REGNO,
+ Acceptance.ADATE,
+ Acceptance.LUSERID as UserID,
+ SysTab.Currency,
+ (SELECT coalesce(SUM(PCALC.TSI*PCALC.RATE),0) FROM  PCALC WHERE PCALC.ANO=ACCEPTANCE.ANO AND ACCEPTANCE.PSTATUS='C')*CASE WHEN ACCEPTANCE.QTY=0 THEN 1 ELSE ACCEPTANCE.QTY END AS TSI,
+ (SELECT coalesce(SUM(PCALC.OURSHARE*PCALC.RATE),0) FROM  PCALC WHERE PCALC.ANO=ACCEPTANCE.ANO AND ACCEPTANCE.PSTATUS='C')*CASE WHEN ACCEPTANCE.QTY=0 THEN 1 ELSE ACCEPTANCE.QTY END AS OURSHARE,
+ (SELECT coalesce(SUM(PCALC.GROSS*PCALC.RATE),0) FROM  PCALC WHERE PCALC.ANO=ACCEPTANCE.ANO AND ACCEPTANCE.PSTATUS='C')*CASE WHEN ACCEPTANCE.QTY=0 THEN 1 ELSE ACCEPTANCE.QTY END AS GROSS,
+ Acceptance.ASTATUS,
+ Acceptance.ATYPE,
+ Acceptance.SDate,
+ Acceptance.EDate,
+ Year(RArrheader.Rdate) AS RYear,
+ Acceptance.ValueID,
+ dbo.get_objectInfo(Acceptance.ANO) as ValueDesc,
+ Acceptance.BatchNo
+From
+ Acceptance,
+ Cover,
+ SysTab, 
+ Rarrheader,
+ AccRegDet
+Where
+ cover.CNO = acceptance.CNO
+ and RArrHeader.ANO=Acceptance.ANO
+ and Acceptance.REGID=@P_REGID
+ And Acceptance.ANO<>Acceptance.LANO
+ And Acceptance.LANO=@P_ANO
+ And Acceptance.ADate Between @P_SDate and @P_EDate
+ And RArrHeader.Status<>'R' And RArrHeader.TAmount<>0
+ And Acceptance.AStatus in ('W','I')
+ And Cover.ISType<>'T'
+ And AccRegDet.RYear=Year(RArrHeader.RDate) and AccRegDet.RegID=Acceptance.RegID and AccRegDet.FLDID=Acceptance.FLDID and AccRegDet.VALUEID=Acceptance.ValueID and AccRegDet.TSI<>0 and RArrHeader.ManualF=0 and AccRegDet.ReAllocF=1
+ And ((Rarrheader.CID<>'' or RArrHeader.XPID<>'' or RArrheader.SP1ID<>'' or RArrHeader.SP2ID<>'' or RArrHeader.SP3ID<>'' or (RArrHeader.QID<>'' and RArrHeader.QSRet<>100)))
+)
+              
+GO
+
+DROP PROCEDURE List15_BLANK
+GO
+CREATE PROCEDURE List15_BLANK(@P_REGID varchar(10), @P_FLDID varchar(255), @P_VALUEID varchar(255), @P_RYear integer=0)
+as
+
+SELECT Cast(0 as bit) as ProcessFlag,	
+	Cover.COVERNO, 
+	Cast(Acceptance.AName as varchar(128)) as Insured, 
+	Cover.CNO, 
+	Cover.CStatus, 
+	Acceptance.lANO, 
+	Acceptance.ANO, 
+	Acceptance.REGNO, 
+	Acceptance.ADATE, 
+	Acceptance.LUSERID as USERID, 
+	SysTab.Currency, 
+	(SELECT coalesce(SUM(PCALC.TSI*PCALC.RATE),0) FROM  PCALC WHERE PCALC.ANO=ACCEPTANCE.ANO AND ACCEPTANCE.PSTATUS='C')*CASE WHEN ACCEPTANCE.QTY=0 THEN 1 ELSE ACCEPTANCE.QTY END AS TSI,
+	(SELECT coalesce(SUM(PCALC.OURSHARE*PCALC.RATE),0) FROM  PCALC WHERE PCALC.ANO=ACCEPTANCE.ANO AND ACCEPTANCE.PSTATUS='C')*CASE WHEN ACCEPTANCE.QTY=0 THEN 1 ELSE ACCEPTANCE.QTY END AS OURSHARE, 
+	(SELECT coalesce(SUM(PCALC.GROSS*PCALC.RATE),0) FROM  PCALC WHERE PCALC.ANO=ACCEPTANCE.ANO AND ACCEPTANCE.PSTATUS='C')*CASE WHEN ACCEPTANCE.QTY=0 THEN 1 ELSE ACCEPTANCE.QTY END AS GROSS,
+	Acceptance.ASTATUS, 
+	Acceptance.ATYPE, 
+	Acceptance.SDate, 
+	Acceptance.EDate, 
+	Year(RArrheader.RDate) AS RYear,
+	Cover.ISType, 
+	Acceptance.Renewal, 
+	Acceptance.ESeqNo, 
+	Acceptance.PolicyNo, 
+	Acceptance.CertificateNo
+FROM 	Acceptance, Cover, SysTab, RArrHeader
+WHERE 	Cover.CNO=Acceptance.CNO 
+	And (Acceptance.ANO=Acceptance.LANO Or Acceptance.LANO=-1) 
+	And Cover.ISType<>'T' 
+	And RArrHeader.Status='A' 
+	And RArrHeader.ANO=Acceptance.ANO 
+	And Acceptance.REGID=@P_REGID
+	And Acceptance.FLDID=@P_FLDID
+	And Acceptance.ValueID Like @P_ValueID + '%'
+	and (@P_RYear=0 or Year(RArrHeader.RDate)=@P_RYear)
+
+union
+
+SELECT Cast(0 as bit) as ProcessFlag,	
+	Cover.COVERNO, 
+	Cast(Acceptance.AName as varchar(128)) as Insured, 
+	Cover.CNO, 
+	Cover.CStatus, 
+	Acceptance.lANO, 
+	Acceptance.ANO, 
+	Acceptance.REGNO, 
+	Acceptance.ADATE, 
+	Acceptance.LUSERID as USERID, 
+	SysTab.Currency, 
+	cast(0 as Float) as TSI,
+	cast(0 as Float) as OurShare,
+	cast(0 as Float) as Gross,
+	Acceptance.ASTATUS, 
+	Acceptance.ATYPE, 
+	Acceptance.SDate, 
+	Acceptance.EDate, 
+	Year(Acceptance.SDate) AS RYear, 
+	Cover.ISType, 
+	Acceptance.Renewal, 
+	Acceptance.ESeqNo, 
+	Acceptance.PolicyNo, 
+	Acceptance.CertificateNo
+FROM 	Acceptance, Cover, SysTab, Acceptance As Acceptance_Detail, RArrHeader
+WHERE 	Cover.CNO=Acceptance.CNO 
+	And Acceptance.ANO=Acceptance_Detail.LANO And Acceptance_Detail.LANO<>Acceptance_Detail.ANO
+	And Cover.ISType<>'T' 
+	And RArrHeader.Status='A' 
+	And RArrHeader.ANO=Acceptance_Detail.ANO 
+	And Acceptance_Detail.REGID=@P_REGID
+	And Acceptance_Detail.FLDID=@P_FLDID
+	And Acceptance_Detail.ValueID Like @P_ValueID + '%'
+	and (@P_RYear=0 or Year(RArrHeader.RDate)=@P_RYear)
+
+GO
+
+DROP FUNCTION List15_Blank_Det
+GO
+
+CREATE FUNCTION List15_Blank_Det (@P_ANO as integer,@P_REGID varchar(10), @P_FLDID varchar(255), @P_VALUEID varchar(255), @P_RYear integer=0)
+RETURNS Table
+as RETURN(
+SELECT Cast(0 as bit) as ProcessFlag,
+ Acceptance.CertificateNo,
+ Acceptance.ESeqNo,
+ Cast(Acceptance.AName as varchar(128)) as AName,
+ Acceptance.ANO,
+ Acceptance.REGNO,
+ Acceptance.ADATE,
+ Acceptance.LUSERID as UserID,
+ SysTab.Currency,
+ (SELECT coalesce(SUM(PCALC.TSI*PCALC.RATE),0) FROM  PCALC WHERE PCALC.ANO=ACCEPTANCE.ANO AND ACCEPTANCE.PSTATUS='C')*CASE WHEN ACCEPTANCE.QTY=0 THEN 1 ELSE ACCEPTANCE.QTY END AS TSI,
+ (SELECT coalesce(SUM(PCALC.OURSHARE*PCALC.RATE),0) FROM  PCALC WHERE PCALC.ANO=ACCEPTANCE.ANO AND ACCEPTANCE.PSTATUS='C')*CASE WHEN ACCEPTANCE.QTY=0 THEN 1 ELSE ACCEPTANCE.QTY END AS OURSHARE,
+ (SELECT coalesce(SUM(PCALC.GROSS*PCALC.RATE),0) FROM  PCALC WHERE PCALC.ANO=ACCEPTANCE.ANO AND ACCEPTANCE.PSTATUS='C')*CASE WHEN ACCEPTANCE.QTY=0 THEN 1 ELSE ACCEPTANCE.QTY END AS GROSS,
+ Acceptance.ASTATUS,
+ Acceptance.ATYPE,
+ Acceptance.SDate,
+ Acceptance.EDate,
+ Year(RArrheader.RDate) AS RYear,
+ Acceptance.ValueID,
+ dbo.get_objectInfo(Acceptance.ANO) as ValueDesc,
+ Acceptance.BatchNo
+From
+ Acceptance,
+ Cover,
+ SysTab,
+ RArrHeader
+Where
+ [cover].[CNO] = [acceptance].[CNO]
+ And [Acceptance].[ANO]<>[Acceptance].[LANO]
+ And [Acceptance].[LANO]=@P_ANO
+ And [Cover].[ISType]<>'T'
+ And [RArrHeader].[Status]='A'
+ And [RArrHeader].[ANO]=[Acceptance].[ANO]
+ And Acceptance.REGID=@P_REGID
+ And [Acceptance].[FLDID]=@P_FLDID
+ And [Acceptance].[ValueID] Like @P_ValueID + '%'
+ and (@P_RYear=0 or Year(RArrHeader.RDate)=@P_RYear)
+)
+  
+
+
+
+                    
+
+ 
+

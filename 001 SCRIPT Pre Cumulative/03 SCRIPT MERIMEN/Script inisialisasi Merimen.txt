@@ -1,0 +1,26 @@
+
+update location set icpsf = 1
+GO
+
+select distinct P.TOI into #TOI from pclass P, TOR T, ratecov R2, ratetab R1 where P.TOR = T.TOR and T.tor = R2.TOR and R2.Code = R1.Code and R1.TOC like '02%'
+GO
+update Toi set icpsf = 1 where toi in (select toi from #toi)
+GO
+
+select distinct C.COL into #COL from COLTAB CT, COL C, ratecov R2, ratetab R1 where CT.COL = c.col and C.TOR = R2.TOR and R2.Code = R1.Code and R1.TOC like '02%'
+GO
+update COLTAB set icpsf = 1 where COL in (select col from #COL)
+GO
+
+select distinct N1.NOC into #NOC from noctab N1, NOC N2, pclass P, ratecov R2, ratetab R1 where N1.NOC=N2.NOC and n2.TOI = P.TOI and P.TOR = R2.TOR and R2.Code = R1.Code and R1.TOC like '02%'
+GO
+Update NOCtab set icpsf = 1 where noc in (select noc from #noc)
+
+GO
+
+select distinct D.Dcode into #DedTab from dedtab D, TOR T, ratecov R2, ratetab R1 where D.TOR = D.TOR and T.tor = R2.TOR and R2.Code = R1.Code and R1.TOC like '02%'
+GO
+Update DedTab set ICPSF=1 where Dcode in (select dcode from #Dedtab)
+
+INSERT INTO CCTYPE VALUES ('Merimen','Merimen',0,1,'care','2016-11-21')
+GO

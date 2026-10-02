@@ -1,0 +1,403 @@
+Drop PROCEDURE QWF_TASKHAuth
+GO
+Create PROCEDURE QWF_TASKHAuth(@P_USERID AS VARCHAR(50))      
+AS      
+SELECT 'My Task' as 'Group'  
+UNION ALL      
+SELECT 'My Subordinate Task' as 'Group'  
+
+GO
+
+Drop PROCEDURE QWF_TASKH
+GO
+Create PROCEDURE QWF_TASKH(@P_USERID AS VARCHAR(50))      
+AS      
+SELECT 'My Task' as 'Group'  
+GO
+
+Drop PROCEDURE QWF_TASK 
+GO
+Create PROCEDURE QWF_TASK(@P_USERID AS VARCHAR(50), @Group AS VARCHAR(1))    
+AS    
+SELECT 'Pickup Task' as 'Category', Count(ID) as 'Count' from WF_PICKUPTASK(@P_USERID, @Group)    
+UNION ALL    
+SELECT 'Pending' as 'Category', Count(ID) as 'Count' from WF_PENDING(@P_USERID, @Group)    
+UNION ALL  
+SELECT 'Other' as 'Category', Count(ID) as 'Count' from WF_OTHERTASK(@P_USERID, @Group)    
+
+GO  
+
+Drop PROCEDURE QWF_PICKUP_TASK
+GO
+CREATE PROCEDURE QWF_PICKUP_TASK(@P_USERID AS VARCHAR(50), @Group AS VARCHAR(1))  
+AS  
+Select Distinct WF.ActionCode, ActionList.Description, Count(ID) as 'TaskCount' from WF_PICKUPTASK(@P_USERID, @Group) WF, ActionList   
+Where WF.ActionCode=ActionList.ActionCode  
+Group By WF.ActionCode, ActionList.Description  
+
+GO  
+
+Drop FUNCTION WF_PICKUPTASK
+GO
+Create FUNCTION WF_PICKUPTASK(@P_USERID AS VARCHAR(50), @Group AS VARCHAR(1))        
+RETURNS TABLE        
+AS RETURN (        
+Select S.ID, S.Remarks, S.UserDate, S.UserTime, S.Param3, coalesce(A.PolicyNo,coalesce(Sv.PolicyNo,'')) as PolicyNo, coalesce(A.CertificateNo,coalesce(Sv.CertificateNo,'')) as CertificateNo ,         
+S.USERID as SentBy, SUSentBy.Name as SentByName, SUSentBy.Branch as SentByBranchID, BranchSentBy.name as SentByBranchName, S.Param5 as SentTo, SU.Name as SentToName, SU.Branch as SentToBranchID, BranchSentto.name as SentToBranchName, S.Status, S.Param2, S.Param4, S.Param6, S.ActionCode         
+,	Case When Param2 = 'UND' then 'Policy Processing'
+		When Param2 = 'CLM' then 'Claim'
+		When Param2 = 'SVC' then 'Servicing'
+		When Param2 = 'MAR' then 'Quotation'
+		When Param2 = 'FA' then 'Finance'
+		When Param2 = 'RQ' then 'Request'
+		else '(None)' 
+	End as AppName   
+,	Case When Param2 = 'UND' then A.RegNO + ' (' + Left(A.AName, 50) + ')'  
+		When Param2 = 'CLM' then C.CLAIMNO + ' (' + Left(C.ClaimantInfo, 50) + ')'  
+		When Param2 = 'SVC' then Sv.ServiceNo + ' (' + Left(SV.Name, 50) + ')'  
+		When Param2 = 'MAR' then Cov.CoverNo + ' (' + Left(A.AName, 50) + ')'  
+		When Param2 = 'FA' then V.Voucher + ' (' + Left(V.Remarks, 50) + ')'  
+		When Param2 = 'RQ' then R.Request + ' (' + Left(R.Remarks, 50) + ')'  
+		else '' 
+	End as DataNo 
+from SysUser SU    
+inner join SysRequest S on (S.Param5=SU.ID or S.Param5 = SU.Type)  
+Left Join Acceptance A on (A.ANO=S.Param3 and S.Param2 in ('MAR','UND'))        
+Left Join Cover Cov on (A.CNO=Cov.CNO)                       
+Left Join Service Sv on (Sv.SNO=S.Param3 and S.Param2='SVC')         
+Left Join Claim C on (C.CNO=S.Param4 and S.Param2='CLM')      
+Left Join Voucher V on (V.Voucher =S.Param6 and S.Param2='FA')              
+Left Join Request R on (R.Request=S.Param6 and S.Param2='RQ')  
+Left Join SysUser SUSentBy on (S.userid = SUSentBy.ID)      
+Left Join Branch BranchSentBy on (SUSentBy.branch = BranchSentBy.Branch)      
+Left Join Branch BranchSentTo on (SU.Branch = BranchSentTo.Branch)           
+Left Join ActionUser on (ActionUser.ActionCode=S.ActionCode and ActionUser.ActionUser=S.Param5)         
+Where S.Param1='SEND' and S.Param2 in ('MAR','UND','CLM','SVC','FA','RQ') and S.Status='' and SU.ID=@P_USERID and S.ActionCode<>''    
+and @Group='1' 
+Union All    
+Select S.ID, S.Remarks, S.UserDate, S.UserTime, S.Param3, coalesce(A.PolicyNo,coalesce(Sv.PolicyNo,'')) as PolicyNo, coalesce(A.CertificateNo,coalesce(Sv.CertificateNo,'')) as CertificateNo , 
+S.USERID as SentBy, SUSentBy.Name as SentByName, SUSentBy.Branch as SentByBranchID, BranchSentBy.name as SentByBranchName, S.Param5 as SentTo, SU.Name as SentToName, SU.Branch as SentToBranchID, BranchSentto.name as SentToBranchName, S.Status, S.Param2, S.Param4, S.Param6, S.ActionCode         
+,	Case When Param2 = 'UND' then 'Policy Processing'
+		When Param2 = 'CLM' then 'Claim'
+		When Param2 = 'SVC' then 'Servicing'
+		When Param2 = 'MAR' then 'Quotation'
+		When Param2 = 'FA' then 'Finance'
+		When Param2 = 'RQ' then 'Request'
+		else '(None)' 
+	End as AppName   
+,	Case When Param2 = 'UND' then A.RegNO + ' (' + Left(A.AName, 50) + ')'  
+		When Param2 = 'CLM' then C.CLAIMNO + ' (' + Left(C.ClaimantInfo, 50) + ')'  
+		When Param2 = 'SVC' then Sv.ServiceNo + ' (' + Left(SV.Name, 50) + ')'  
+		When Param2 = 'MAR' then Cov.CoverNo + ' (' + Left(A.AName, 50) + ')'  
+		When Param2 = 'FA' then V.Voucher + ' (' + Left(V.Remarks, 50) + ')'  
+		When Param2 = 'RQ' then R.Request + ' (' + Left(R.Remarks, 50) + ')'  
+		else '' 
+	End as DataNo         
+from SysUser SU
+Left Join SysRequest S on 1=1
+Left Join Acceptance A on (A.ANO=S.Param3 and S.Param2 in ('MAR','UND'))          
+Left Join Cover Cov on (A.CNO=Cov.CNO)                              
+Left Join Service Sv on (Sv.SNO=S.Param3 and S.Param2='SVC')         
+Left Join Claim C on (C.CNO=S.Param4 and S.Param2='CLM')         
+Left Join Voucher V on (V.Voucher =S.Param6 and S.Param2='FA')              
+Left Join Request R on (R.Request=S.Param6 and S.Param2='RQ')  
+Left Join SysUser SUSentBy on (S.userid = SUSentBy.ID)      
+Left Join Branch BranchSentBy on (SUSentBy.branch = BranchSentBy.Branch)      
+Left Join Branch BranchSentTo on (S.param5 = SU.id and SU.Branch = BranchSentTo.Branch)         
+Inner Join ActionUser on (ActionUser.ActionCode=S.ActionCode and ActionUser.ActionUser=S.Param5)
+Inner Join ActionList on (ActionList.ActionCode=S.ActionCode) 
+Where S.Param1='SEND' and S.Param2 in ('MAR','UND','CLM','SVC','FA','RQ') and S.Status='' and SU.ID=@P_USERID and S.ActionCode<>''    
+and @Group='2' and (ActionUser.ActionUserAuth_1=SU.ID or ActionUser.ActionUserAuth_2=SU.ID or ActionUser.ActionUserAuth_3=SU.ID or ActionUser.ActionUserAuth_4=SU.ID or ActionUser.ActionUserAuth_5=SU.ID or ActionUser.ActionUserAuth_6=SU.ID or ActionUser.ActionUserAuth_7=SU.ID or ActionUser.ActionUserAuth_8=SU.ID or ActionUser.ActionUserAuth_9=SU.ID or ActionUser.ActionUserAuth_10=SU.ID)
+and (ActionList.ActionNotification=0  or (ActionList.ActionNotification>0 and datediff(day,S.UserDate, getdate())>ActionList.ActionNotification))
+)  
+
+GO
+
+DROP PROCEDURE QWF_PENDING_TASK
+GO
+CREATE PROCEDURE QWF_PENDING_TASK(@P_USERID AS VARCHAR(50), @Group AS VARCHAR(1))  
+AS  
+Select Distinct WF.ActionCode, ActionList.Description, Count(ID) as 'TaskCount' from WF_PENDING(@P_USERID, @Group) WF, ActionList   
+Where WF.ActionCode=ActionList.ActionCode  
+Group By WF.ActionCode, ActionList.Description  
+  
+GO
+
+Drop PROCEDURE QWF_DETAIL_PICKUP_TASK
+GO
+CREATE PROCEDURE QWF_DETAIL_PICKUP_TASK(@P_USERID AS VARCHAR(50), @P_ACTIONCODE AS VARCHAR(10), @Group AS VARCHAR(1), @Remarks AS VARCHAR(255))  
+AS  
+Select * from WF_PICKUPTASK(@P_USERID, @Group) Where ActionCode=@P_ACTIONCODE and (Remarks like '%' + @Remarks + '%' or DataNo like '%' + @Remarks + '%') order by UserDate desc, UserTime desc  
+
+GO
+
+Drop Procedure QWF_OTHER_TASK
+GO
+CREATE PROCEDURE QWF_OTHER_TASK(@P_USERID AS VARCHAR(50), @Group AS VARCHAR(1))  
+AS  
+Select 'Other' as ActionCode, 'Other Tasks' as Description, Count(ID) as 'TaskCount' from WF_OTHER(@P_USERID, @Group) Group By ActionCode    
+  
+Go 
+Drop Procedure QWF_PENDING_TASK
+GO
+CREATE PROCEDURE QWF_PENDING_TASK(@P_USERID AS VARCHAR(50), @Group AS VARCHAR(1))
+AS
+Select Distinct WF.ActionCode, ActionList.Description, Count(ID) as 'TaskCount' from WF_PENDING(@P_USERID, @Group) WF, ActionList 
+Where WF.ActionCode=ActionList.ActionCode
+Group By WF.ActionCode, ActionList.Description
+
+GO
+
+Drop Procedure QWF_PICKUP_TASK
+GO
+CREATE PROCEDURE QWF_PICKUP_TASK(@P_USERID AS VARCHAR(50), @Group AS VARCHAR(1))
+AS
+Select Distinct WF.ActionCode, ActionList.Description, Count(ID) as 'TaskCount' from WF_PICKUPTASK(@P_USERID, @Group) WF, ActionList 
+Where WF.ActionCode=ActionList.ActionCode
+Group By WF.ActionCode, ActionList.Description
+
+GO
+
+Drop procedure QWF_ASSIGNUSER
+GO  
+CREATE PROCEDURE QWF_ASSIGNUSER(@P_USERID AS VARCHAR(50), @P_ACTIONCODE AS VARCHAR(10))  
+AS  
+SELECT S.ID, S.NAME, S.TYPE FROM (  
+SELECT ID, NAME, 'U' AS TYPE FROM SYSUSER WHERE ALLOWEDF=1 UNION ALL SELECT TYPE AS ID, DESCRIPTION AS NAME, 'T' AS TYPE FROM SYSUSERTYPE) S,  
+ACTIONUSER A WHERE (A.ACTIONUSERAUTH_1=@P_USERID OR A.ACTIONUSERAUTH_2=@P_USERID OR A.ACTIONUSERAUTH_3=@P_USERID OR A.ACTIONUSERAUTH_4=@P_USERID OR A.ACTIONUSERAUTH_5=@P_USERID OR A.ACTIONUSERAUTH_6=@P_USERID OR A.ACTIONUSERAUTH_7=@P_USERID OR A.ACTIONUSERAUTH_8=@P_USERID OR A.ACTIONUSERAUTH_9=@P_USERID OR A.ACTIONUSERAUTH_10=@P_USERID) AND A.ACTIONUSER=S.ID   
+AND A.ACTIONCODE=@P_ACTIONCODE  
+
+GO
+
+
+DROP FUNCTION WF_PENDING
+GO
+CREATE FUNCTION WF_PENDING(@P_USERID AS VARCHAR(50), @Group AS VARCHAR(1))            
+RETURNS TABLE            
+AS RETURN (            
+Select S.ID, S.Remarks, S.UserDate, S.UserTime, S.Param3, Coalesce(A.PolicyNo,coalesce(Sv.PolicyNo,'')) as PolicyNo, coalesce(A.CertificateNo,coalesce(Sv.CertificateNo,'')) as CertificateNo ,            
+S.USERID as SentBy, SUSentBy.Name as SentByName, SUSentBy.Branch as SentByBranchID, BranchSentBy.name as SentByBranchName, S.Param5 as SentTo, SU.Name as SentToName, SU.Branch as SentToBranchID, BranchSentto.name as SentToBranchName, S.Status, S.Param2, S.Param4, S.Param6, S.ActionCode
+,	Case When Param2 = 'UND' then 'Policy Processing'
+		When Param2 = 'CLM' then 'Claim'
+		When Param2 = 'SVC' then 'Servicing'
+		When Param2 = 'MAR' then 'Quotation'
+		When Param2 = 'FA' then 'Finance'
+		When Param2 = 'RQ' then 'Request'
+		else '(None)' 
+	End as AppName   
+,	Case When Param2 = 'UND' then A.RegNO + ' (' + Left(A.AName, 50) + ')'  
+		When Param2 = 'CLM' then C.CLAIMNO + ' (' + Left(C.ClaimantInfo, 50) + ')'  
+		When Param2 = 'SVC' then Sv.ServiceNo + ' (' + Left(SV.Name, 50) + ')'  
+		When Param2 = 'MAR' then Cov.CoverNo + ' (' + Left(A.AName, 50) + ')'  
+		When Param2 = 'FA' then V.Voucher + ' (' + Left(V.Remarks, 50) + ')'  
+		When Param2 = 'RQ' then R.Request + ' (' + Left(R.Remarks, 50) + ')'  
+		else '' 
+	End as DataNo 
+from SysRequest S            
+Left Join Acceptance A on (A.ANO=S.Param3) 
+Left Join Cover Cov on (A.CNO=Cov.CNO)                              
+Left Join Service Sv on (Sv.SNO=S.Param3 and S.Param2='SVC')            
+Left Join Claim C on (C.CNO=S.Param4 and S.Param2='CLM')     
+Left Join Voucher V on (V.Voucher =S.Param6 and S.Param2='FA')            
+Left Join Request R on (R.Request=S.Param6 and S.Param2='RQ')   
+Left Join SysUser SUSentBy on (S.userid = SUSentBy.ID)        
+Left Join SysUser SU on (SU.id = S.Param5)      
+Left Join Branch BranchSentBy on (SUSentBy.branch = BranchSentBy.Branch)      
+Left Join Branch BranchSentTo on (SU.Branch = BranchSentTo.Branch)           
+Left Join ActionUser on (ActionUser.ActionCode=S.ActionCode and ActionUser.ActionUser=S.userid)           
+Where S.Param1='SEND' and S.Status='' and S.ActionCode<>''        
+and @Group='1' and S.UserID=@P_USERID        
+Union All        
+Select S.ID, S.Remarks, S.UserDate, S.UserTime, S.Param3, coalesce(A.PolicyNo,coalesce(Sv.PolicyNo,'')) as PolicyNo, coalesce(A.CertificateNo,coalesce(Sv.CertificateNo,'')) as CertificateNo ,            
+S.USERID as SentBy, SUSentBy.Name as SentByName, SUSentBy.Branch as SentByBranchID, BranchSentBy.name as SentByBranchName, S.Param5 as SentTo, SU.Name as SentToName, SU.Branch as SentToBranchID, BranchSentto.name as SentToBranchName, S.Status, S.Param2, S.Param4, S.Param6, S.ActionCode
+,	Case When Param2 = 'UND' then 'Policy Processing'
+		When Param2 = 'CLM' then 'Claim'
+		When Param2 = 'SVC' then 'Servicing'
+		When Param2 = 'MAR' then 'Quotation'
+		When Param2 = 'FA' then 'Finance'
+		When Param2 = 'RQ' then 'Request'
+		else '(None)' 
+	End as AppName   
+,	Case When Param2 = 'UND' then A.RegNO + ' (' + Left(A.AName, 50) + ')'  
+		When Param2 = 'CLM' then C.CLAIMNO + ' (' + Left(C.ClaimantInfo, 50) + ')'  
+		When Param2 = 'SVC' then Sv.ServiceNo + ' (' + Left(SV.Name, 50) + ')'  
+		When Param2 = 'MAR' then Cov.CoverNo + ' (' + Left(A.AName, 50) + ')'  
+		When Param2 = 'FA' then V.Voucher + ' (' + Left(V.Remarks, 50) + ')'  
+		When Param2 = 'RQ' then R.Request + ' (' + Left(R.Remarks, 50) + ')'  
+		else '' 
+	End as DataNo 
+from SysRequest S            
+Left Join Acceptance A on (A.ANO=S.Param3) 
+Left Join Cover Cov on (A.CNO=Cov.CNO)                                         
+Left Join Service Sv on (Sv.SNO=S.Param3 and S.Param2='SVC')            
+Left Join Claim C on (C.CNO=S.Param4 and S.Param2='CLM')        
+Left Join Voucher V on (V.Voucher =S.Param6 and S.Param2='FA')            
+Left Join Request R on (R.Request=S.Param6 and S.Param2='RQ')    
+Left Join SysUser SUSentBy on (S.userid = SUSentBy.ID)        
+Left Join SysUser SU on (SU.id = S.Param5)      
+Left Join Branch BranchSentBy on (SUSentBy.branch = BranchSentBy.Branch)      
+Left Join Branch BranchSentTo on (SU.Branch = BranchSentTo.Branch)                
+Left Join ActionUser on (ActionUser.ActionCode=S.ActionCode and ActionUser.ActionUser=S.userid)           
+Where S.Param1='SEND' and S.Status='' and S.ActionCode<>''        
+and @Group<>'1' and (ActionUser.ActionUserAuth_1=@P_USERID or ActionUser.ActionUserAuth_2=@P_USERID or ActionUser.ActionUserAuth_3=@P_USERID or ActionUser.ActionUserAuth_4=@P_USERID or ActionUser.ActionUserAuth_5=@P_USERID or ActionUser.ActionUserAuth_6=@P_USERID or ActionUser.ActionUserAuth_7=@P_USERID or ActionUser.ActionUserAuth_8=@P_USERID or ActionUser.ActionUserAuth_9=@P_USERID or ActionUser.ActionUserAuth_10=@P_USERID)
+Union All        
+Select S.ID, S.Remarks, S.UserDate, S.UserTime, S.Param3, coalesce(A.PolicyNo,coalesce(Sv.PolicyNo,'')) as PolicyNo, coalesce(A.CertificateNo,coalesce(Sv.CertificateNo,'')) as CertificateNo ,            
+S.USERID as SentBy, SUSentBy.Name as SentByName, SUSentBy.Branch as SentByBranchID, BranchSentBy.name as SentByBranchName, S.Param5 as SentTo, SU.Name as SentToName, SU.Branch as SentToBranchID, BranchSentto.name as SentToBranchName, S.Status, S.Param2, S.Param4, S.Param6, S.ActionCode
+,	Case When Param2 = 'UND' then 'Policy Processing'
+		When Param2 = 'CLM' then 'Claim'
+		When Param2 = 'SVC' then 'Servicing'
+		When Param2 = 'MAR' then 'Quotation'
+		When Param2 = 'FA' then 'Finance'
+		When Param2 = 'RQ' then 'Request'
+		else '(None)' 
+	End as AppName   
+,	Case When Param2 = 'UND' then A.RegNO + ' (' + Left(A.AName, 50) + ')'  
+		When Param2 = 'CLM' then C.CLAIMNO + ' (' + Left(C.ClaimantInfo, 50) + ')'  
+		When Param2 = 'SVC' then Sv.ServiceNo + ' (' + Left(SV.Name, 50) + ')'  
+		When Param2 = 'MAR' then Cov.CoverNo + ' (' + Left(A.AName, 50) + ')'  
+		When Param2 = 'FA' then V.Voucher + ' (' + Left(V.Remarks, 50) + ')'  
+		When Param2 = 'RQ' then R.Request + ' (' + Left(R.Remarks, 50) + ')'  
+		else '' 
+	End as DataNo 
+from SysRequest S            
+Left Join Acceptance A on (A.ANO=S.Param3)  
+Left Join Cover Cov on (A.CNO=Cov.CNO)                                                 
+Left Join Service Sv on (Sv.SNO=S.Param3 and S.Param2='SVC')            
+Left Join Claim C on (C.CNO=S.Param4 and S.Param2='CLM')   
+Left Join Voucher V on (V.Voucher =S.Param6 and S.Param2='FA')            
+Left Join Request R on (R.Request=S.Param6 and S.Param2='RQ')  
+Left Join SysUser SUSentBy on (S.userid = SUSentBy.ID)        
+Left Join SysUser SU on (SU.id = S.Param5)      
+Left Join Branch BranchSentBy on (SUSentBy.branch = BranchSentBy.Branch)      
+Left Join Branch BranchSentTo on (SU.Branch = BranchSentTo.Branch)               
+Left Join ActionUser on (ActionUser.ActionCode=S.ActionCode and ActionUser.ActionUser=S.userid)           
+Where S.Param1='SEND' and S.Status='' and (Param3 <> 0 or s.Param4 <> 0)  and (S.ActionCode='' or s.ActionCode is null)  
+and @Group='1' and S.USERID=@P_USERID       
+)         
+
+GO
+
+Drop FUNCTION WF_Pending_OTHER
+GO
+Create FUNCTION WF_Pending_OTHER(@P_USERID AS VARCHAR(50), @Group AS VARCHAR(1))                
+RETURNS TABLE                
+AS RETURN (                
+Select S.ID, S.Remarks, S.UserDate, S.UserTime, S.Param3, coalesce(A.PolicyNo,coalesce(Sv.PolicyNo,'')) as PolicyNo, coalesce(A.CertificateNo,coalesce(Sv.CertificateNo,'')) as CertificateNo ,               
+S.USERID as SentBy, SUSentBy.Name as SentByName, SUSentBy.Branch as SentByBranchID, BranchSentBy.name as SentByBranchName, S.Param5 as SentTo, SU.Name as SentToName, SU.Branch as SentToBranchID, BranchSentto.name as SentToBranchName, S.Status, S.Param2, S.Param4, S.Param6, 'OTHER' as ActionCode
+,	Case When Param2 = 'UND' then 'Policy Processing'
+		When Param2 = 'CLM' then 'Claim'
+		When Param2 = 'SVC' then 'Servicing'
+		When Param2 = 'MAR' then 'Quotation'
+		When Param2 = 'FA' then 'Finance'
+		When Param2 = 'RQ' then 'Request'
+		else '(None)' 
+	End as AppName   
+,	Case When Param2 = 'UND' then A.RegNO + ' (' + Left(A.AName, 50) + ')'  
+		When Param2 = 'CLM' then C.CLAIMNO + ' (' + Left(C.ClaimantInfo, 50) + ')'  
+		When Param2 = 'SVC' then Sv.ServiceNo + ' (' + Left(SV.Name, 50) + ')'  
+		When Param2 = 'MAR' then Cov.CoverNo + ' (' + Left(A.AName, 50) + ')'  
+		When Param2 = 'FA' then V.Voucher + ' (' + Left(V.Remarks, 50) + ')'  
+		When Param2 = 'RQ' then R.Request + ' (' + Left(R.Remarks, 50) + ')'  
+		else '' 
+	End as DataNo 
+from SysUser SU
+inner join SysRequest S on (SU.ID = S.Userid)            
+Left Join Acceptance A on (A.ANO=S.Param3 and S.Param2 in ('MAR','UND'))    
+Left Join Cover Cov on (A.CNO=Cov.CNO)                                
+Left Join Service Sv on (Sv.SNO=S.Param3 and S.Param2='SVC')               
+Left Join Claim C on (C.CNO=S.Param4 and S.Param2='CLM')         
+Left Join Voucher V on (V.Voucher =S.Param6 and S.Param2='FA')            
+Left Join Request R on (R.Request=S.Param6 and S.Param2='RQ') 
+Left Join SysUser SUSentBy on (S.userid = SUSentBy.ID)      
+Left Join Branch BranchSentBy on (SUSentBy.branch = BranchSentBy.Branch)      
+Left Join Branch BranchSentTo on (SU.Branch = BranchSentTo.Branch)          
+Where S.Param1='SEND' and S.Param2 in ('MAR','UND','CLM','SVC','FA','RQ') and S.Status='' and SU.ID=@P_USERID and  (s.Param3<>0 or s.Param4 <> 0) and (S.ActionCode='' or S.ActionCode is null)          
+)             
+
+GO
+
+Drop PROCEDURE QWF_DETAIL_PENDING_TASK
+GO
+CREATE PROCEDURE QWF_DETAIL_PENDING_TASK(@P_USERID AS VARCHAR(50), @P_ACTIONCODE AS VARCHAR(10), @Group AS VARCHAR(1), @Remarks AS VARCHAR(255))    
+AS    
+SELECT * from (  
+Select * from WF_PENDING(@P_USERID, @Group) Where ActionCode=@P_ACTIONCODE  and (Remarks like '%' + @Remarks + '%' or DataNo like '%' + @Remarks + '%') 
+union all    
+Select * from WF_Pending_OTHER(@P_USERID, @Group) Where ActionCode=@P_ACTIONCODE and (Remarks like '%' + @Remarks + '%' or DataNo like '%' + @Remarks + '%') 
+) A  
+order by UserDate desc, UserTime desc  
+
+GO
+
+DROP FUNCTION WF_OTHER
+GO
+CREATE FUNCTION WF_OTHER(@P_USERID AS VARCHAR(50), @Group AS VARCHAR(1))          
+RETURNS TABLE          
+AS RETURN (            
+Select S.ID, S.Remarks, S.UserDate, S.UserTime, S.Param3, coalesce(A.PolicyNo,coalesce(Sv.PolicyNo,'')) as PolicyNo, coalesce(A.CertificateNo,coalesce(Sv.CertificateNo,'')) as CertificateNo, 
+S.USERID as SentBy, SUSentBy.Name as SentByName, SUSentBy.Branch as SentByBranchID, BranchSentBy.name as SentByBranchName, S.Param5 as SentTo, SU.Name as SentToName, SU.Branch as SentToBranchID, BranchSentto.name as SentToBranchName, S.Status, S.Param2, S.Param4, S.Param6, 'OTHER' as ActionCode
+,	Case When Param2 = 'UND' then 'Policy Processing'
+		When Param2 = 'CLM' then 'Claim'
+		When Param2 = 'SVC' then 'Servicing'
+		When Param2 = 'MAR' then 'Quotation'
+		When Param2 = 'FA' then 'Finance'
+		When Param2 = 'RQ' then 'Request'
+		else '(None)' 
+	End as AppName   
+,	Case When Param2 = 'UND' then A.RegNO + ' (' + Left(A.AName, 50) + ')'  
+		When Param2 = 'CLM' then C.CLAIMNO + ' (' + Left(C.ClaimantInfo, 50) + ')'  
+		When Param2 = 'SVC' then Sv.ServiceNo + ' (' + Left(SV.Name, 50) + ')'  
+		When Param2 = 'MAR' then Cov.CoverNo + ' (' + Left(A.AName, 50) + ')'  
+		When Param2 = 'FA' then V.Voucher + ' (' + Left(V.Remarks, 50) + ')'  
+		When Param2 = 'RQ' then R.Request + ' (' + Left(R.Remarks, 50) + ')'  
+		else '' 
+	End as DataNo  
+from SysUser SU
+inner join SysRequest S on (S.Param5=SU.ID or S.Param5 = SU.Type)              
+Left Join Acceptance A on (A.ANO=S.Param3 and S.Param2 in ('MAR','UND'))    
+Left Join Cover Cov on (A.CNO=Cov.CNO)                   
+Left Join Service Sv on (Sv.SNO=S.Param3 and S.Param2='SVC')            
+Left Join Claim C on (C.CNO=S.Param4 and S.Param2='CLM')      
+Left Join Voucher V on (V.Voucher =S.Param6 and S.Param2='FA')            
+Left Join Request R on (R.Request=S.Param6 and S.Param2='RQ')         
+Left Join SysUser SUSentBy on (S.userid = SUSentBy.ID)      
+Left Join Branch BranchSentBy on (SUSentBy.branch = BranchSentBy.Branch)      
+Left Join Branch BranchSentTo on (SU.Branch = BranchSentTo.Branch)      
+Where S.Param1='SEND' and S.Status='' and SU.ID = @P_USERID  
+and S.param2 <> ''
+and (S.ActionCode is NULL or S.ActionCode = '')       
+and '1' = @Group      
+)  
+
+GO
+
+DROP FUNCTION WF_OTHERTASK
+GO
+CREATE FUNCTION WF_OTHERTASK(@P_USERID AS VARCHAR(50), @Group AS VARCHAR(1))              
+RETURNS TABLE              
+AS RETURN (              
+Select S.ID, S.Remarks, S.UserDate, S.UserTime, S.Param3,             
+coalesce(A.PolicyNo,coalesce(Sv.PolicyNo,'')) as PolicyNo, coalesce(A.CertificateNo,coalesce(Sv.CertificateNo,'')) as CertificateNo,           
+Case When A.AName is null then Sv.Insured  end as AName ,             
+S.UserID as SentBy, S.Param5 as SentTo, S.Status, S.Param2, S.Param4, S.ActionCode             
+from SysUser SU, SysRequest S            
+Left Join Acceptance A on (A.ANO=S.Param3 and S.Param2 in ('MAR','UND'))             
+Left Join Service Sv on (Sv.SNO=S.Param3 and S.Param2='SVC')             
+Left Join Claim C on (C.CNO=S.Param4 and S.Param2='CLM')      
+Left Join Voucher V on (V.Voucher =S.Param6 and S.Param2='FA')            
+Left Join Request R on (R.Request=S.Param6 and S.Param2='RQ')           
+Where S.Param1='SEND' and S.Param2 in ('MAR','UND','CLM','SVC','FA','RQ') and S.Status='' and SU.ID=@P_USERID and (S.Param5 = SU.ID or S.Param5 = SU.Type) and (S.ActionCode=''   or S.ActionCode is null)      
+)           
+
+GO
+
+Drop PROCEDURE QWF_DETAIL_OTHER_TASK
+GO
+CREATE PROCEDURE QWF_DETAIL_OTHER_TASK(@P_USERID AS VARCHAR(50), @P_ACTIONCODE AS VARCHAR(10), @Group AS VARCHAR(1), @Remarks AS VARCHAR(255))    
+AS    
+Select * from WF_OTHER(@P_USERID, @Group) Where ActionCode=@P_ACTIONCODE and (Remarks like '%' + @Remarks + '%' or DataNo like '%' + @Remarks + '%')  order by UserDate desc, UserTime desc   
+GO
+
+
+
+  

@@ -1,0 +1,157 @@
+DROP FUNCTION CCALC01a
+GO
+CREATE FUNCTION CCALC01a(@P_CNO as integer)            
+RETURNS Table            
+AS RETURN (            
+SELECT CLLoss.Currency as Currency, Max(RCOVER.CODE) as Code, max(ICALC.TOR) as TOR,            
+ Max(    
+  CASE            
+   WHEN CLLOSS.VAR<=CLLOSS.DECLARED THEN (CLLOSS.ESTIMATE)
+   ELSE (CLLOSS.DECLARED/CLLOSS.VAR) * (CLLOSS.ESTIMATE) 
+  END    
+ ) as LOSS,            
+ Max(    
+  CASE            
+   WHEN CLLOSS.STATUS<>'P' THEN 0
+   WHEN CLLOSS.VAR<=CLLOSS.DECLARED THEN (CLLOSS.AMOUNT)             
+   ELSE (CLLOSS.DECLARED/CLLOSS.VAR) * (CLLOSS.AMOUNT)             
+  END    
+ ) as INDEMNITY,            
+ Max(    
+  CASE            
+   WHEN CLLOSS.VAR<=CLLOSS.DECLARED THEN CLLOSS.ESTIMATE            
+   ELSE (CLLOSS.DECLARED/CLLOSS.VAR) * CLLOSS.ESTIMATE            
+  END*(RCOVER.COSHARE)/100    
+ ) 
+ +
+ Max(    
+  CASE            
+   WHEN CLLOSS.VAR<=CLLOSS.DECLARED THEN CLLOSS.EDEPRECIATION            
+   ELSE (CLLOSS.DECLARED/CLLOSS.VAR) * CLLOSS.EDEPRECIATION
+  END
+ ) 
+ as EDEDUCTIBLE,            
+ Max(    
+  CASE            
+   WHEN CLLOSS.STATUS<>'P' THEN 0
+   WHEN CLLOSS.VAR<=CLLOSS.DECLARED THEN CLLOSS.AMOUNT            
+   ELSE (CLLOSS.DECLARED/CLLOSS.VAR) * CLLOSS.AMOUNT            
+  END*(RCOVER.COSHARE)/100    
+ ) 
+ +
+ Max(    
+  CASE            
+   WHEN CLLOSS.STATUS<>'P' THEN 0
+   WHEN CLLOSS.VAR<=CLLOSS.DECLARED THEN CLLOSS.DEPRECIATION            
+   ELSE (CLLOSS.DECLARED/CLLOSS.VAR) * CLLOSS.DEPRECIATION
+  END
+ ) 
+ as DEDUCTIBLE,            
+ 0 as ESALVAGE, 0 AS SALVAGE
+From CLAIM
+INNER JOIN CLLOSS ON (CLLOSS.CNO=CLAIM.CNO)
+INNER JOIN ACCEPTANCE ON (ACCEPTANCE.ANO=CLAIM.ANO)
+INNER JOIN COVER ON (COVER.CNO=ACCEPTANCE.CNO)
+INNER JOIN RCOVER ON (RCOVER.ANO=ACCEPTANCE.ANO)
+INNER JOIN ICALC ON (ICALC.ANO=RCOVER.ANO AND ICALC.CODE=RCOVER.CODE AND ICALC.SDATE=RCOVER.SDATE AND ICALC.INO=CLLOSS.INO)
+INNER JOIN COL ON (COL.COL=CLAIM.COL AND COL.TOR=ICALC.TOR)
+WHERE CLAIM.CNO=@P_CNO 
+AND (RCover.RetroActiveF=1 or (RCOVER.SDATE<=CLAIM.LOSSDATE AND ACCEPTANCE.ExclusiveF=1) or ((RCOVER.SDATE<CLAIM.LOSSDATE or (RCOVER.SDATE=CLAIM.LOSSDATE AND ACCEPTANCE.STIME<=Claim.LossTime)) AND ACCEPTANCE.ExclusiveF=0))           
+AND ((dbo.fn_Get_ExtPeriodDate(ACCEPTANCE.ExtRPeriod, 0, dbo.fn_Get_ExtPeriodDate(ACCEPTANCE.ExtPeriod, ACCEPTANCE.ExtPeriodInDaysF, RCOVER.EDATE))>CLAIM.LOSSDATE AND ACCEPTANCE.ExclusiveF=1) or ((dbo.fn_Get_ExtPeriodDate(ACCEPTANCE.ExtRPeriod, 0, dbo.fn_Get_ExtPeriodDate(ACCEPTANCE.ExtPeriod, ACCEPTANCE.ExtPeriodInDaysF, RCOVER.EDATE))>CLAIM.LOSSDATE or (dbo.fn_Get_ExtPeriodDate(ACCEPTANCE.ExtRPeriod, 0, dbo.fn_Get_ExtPeriodDate(ACCEPTANCE.ExtPeriod, ACCEPTANCE.ExtPeriodInDaysF, RCOVER.EDATE))=CLAIM.LOSSDATE AND ACCEPTANCE.ETIME>Claim.LossTime)) AND ACCEPTANCE.ExclusiveF=0))          
+Group By CLLOSS.CNO, CLLOSS.INO, CLLOSS.PAYMENT, CLLOSS.NOC, CLLOSS.Currency, CLLOSS.RefNo  
+    
+Union All            
+                      
+SELECT CLDed.Currency as Currency, 
+Max(RCOVER.CODE) as Code, 
+Max(RCALC.TOR) as TOR, 
+0 AS LOSS, 
+0 AS INDEMNITY, 
+Max(CLDED.ESTAMOUNT) AS EDEDUCTIBLE, 
+Max(CLDED.AMOUNT) AS DEDUCTIBLE, 
+0 as ESALVAGE, 
+0 AS SALVAGE            
+From CLAIM
+INNER JOIN CLDED ON (CLDED.CNO=CLAIM.CNO)
+INNER JOIN ACCEPTANCE ON (ACCEPTANCE.ANO=CLAIM.ANO)
+INNER JOIN COVER ON (COVER.CNO=ACCEPTANCE.CNO)
+INNER JOIN RCOVER ON (RCOVER.ANO=ACCEPTANCE.ANO)
+INNER JOIN RCALC ON (RCALC.ANO=RCOVER.ANO AND RCALC.CODE=RCOVER.CODE AND RCALC.SDATE=RCOVER.SDATE)
+INNER JOIN COL ON (COL.COL=CLAIM.COL AND COL.TOR=RCALC.TOR )
+INNER JOIN DEDTAB ON (DEDTAB.DCODE=CLDED.DCODE AND DEDTAB.TOR=COL.TOR)
+WHERE CLAIM.CNO=@P_CNO AND (CLDED.ESTAMOUNT<>0 or CLDED.AMOUNT<>0)            
+AND (RCover.RetroActiveF=1 or (RCOVER.SDATE<=CLAIM.LOSSDATE AND ACCEPTANCE.ExclusiveF=1) or ((RCOVER.SDATE<CLAIM.LOSSDATE or (RCOVER.SDATE=CLAIM.LOSSDATE AND ACCEPTANCE.STIME<=Claim.LossTime)) AND ACCEPTANCE.ExclusiveF=0))           
+AND ((dbo.fn_Get_ExtPeriodDate(ACCEPTANCE.ExtRPeriod, 0, dbo.fn_Get_ExtPeriodDate(ACCEPTANCE.ExtPeriod, ACCEPTANCE.ExtPeriodInDaysF, RCOVER.EDATE))>CLAIM.LOSSDATE AND ACCEPTANCE.ExclusiveF=1) or ((dbo.fn_Get_ExtPeriodDate(ACCEPTANCE.ExtRPeriod, 0, dbo.fn_Get_ExtPeriodDate(ACCEPTANCE.ExtPeriod, ACCEPTANCE.ExtPeriodInDaysF, RCOVER.EDATE))>CLAIM.LOSSDATE or (dbo.fn_Get_ExtPeriodDate(ACCEPTANCE.ExtRPeriod, 0, dbo.fn_Get_ExtPeriodDate(ACCEPTANCE.ExtPeriod, ACCEPTANCE.ExtPeriodInDaysF, RCOVER.EDATE))=CLAIM.LOSSDATE AND ACCEPTANCE.ETIME>Claim.LossTime)) AND ACCEPTANCE.ExclusiveF=0))     
+Group by CLDED.CNO, CLDED.DCode, CLDED.ID, CLDED.Currency    
+    
+                      
+Union All            
+                      
+SELECT CLSAL.CURRENCY, 
+Max(RCOVER.CODE) as Code, 
+Max(ICALC.TOR) as TOR, 
+0 AS LOSS, 
+0 AS INDEMNITY, 
+0 AS EDEDUCTIBLE, 
+0 AS DEDUCTIBLE, 
+MAX(CLSAL.EAMOUNT-Case When CLSAL.Amount<>0 Then CLSAL.EAmount/CLSAL.Amount*CLSAL.VAT Else 0 end) AS ESALVAGE, 
+Max(CLSAL.AMOUNT-CLSAL.VAT) AS SALVAGE
+From CLAIM
+INNER JOIN CLSAL ON (CLSAL.CNO=CLAIM.CNO)
+INNER JOIN ACCEPTANCE ON (ACCEPTANCE.ANO=CLAIM.ANO)
+INNER JOIN COVER ON (COVER.CNO=ACCEPTANCE.CNO)
+INNER JOIN RCOVER ON (RCOVER.ANO=ACCEPTANCE.ANO)
+INNER JOIN ICALC ON (ICALC.ANO=RCOVER.ANO AND ICALC.CODE=RCOVER.CODE AND ICALC.SDATE=RCOVER.SDATE AND ICALC.INO=CLSAL.INO)
+INNER JOIN COL ON (COL.COL=CLAIM.COL AND COL.TOR=ICALC.TOR)
+WHERE CLAIM.CNO=@P_CNO AND CLSAL.Status='P'        
+AND (RCover.RetroActiveF=1 or (RCOVER.SDATE<=CLAIM.LOSSDATE AND ACCEPTANCE.ExclusiveF=1) or ((RCOVER.SDATE<CLAIM.LOSSDATE or (RCOVER.SDATE=CLAIM.LOSSDATE AND ACCEPTANCE.STIME<=Claim.LossTime)) AND ACCEPTANCE.ExclusiveF=0))           
+AND ((dbo.fn_Get_ExtPeriodDate(ACCEPTANCE.ExtRPeriod, 0, dbo.fn_Get_ExtPeriodDate(ACCEPTANCE.ExtPeriod, ACCEPTANCE.ExtPeriodInDaysF, RCOVER.EDATE))>CLAIM.LOSSDATE AND ACCEPTANCE.ExclusiveF=1) or ((dbo.fn_Get_ExtPeriodDate(ACCEPTANCE.ExtRPeriod, 0, dbo.fn_Get_ExtPeriodDate(ACCEPTANCE.ExtPeriod, ACCEPTANCE.ExtPeriodInDaysF, RCOVER.EDATE))>CLAIM.LOSSDATE or (dbo.fn_Get_ExtPeriodDate(ACCEPTANCE.ExtRPeriod, 0, dbo.fn_Get_ExtPeriodDate(ACCEPTANCE.ExtPeriod, ACCEPTANCE.ExtPeriodInDaysF, RCOVER.EDATE))=CLAIM.LOSSDATE AND ACCEPTANCE.ETIME>Claim.LossTime)) AND ACCEPTANCE.ExclusiveF=0))          
+Group By CLSAL.CNO, CLSAL.INO, CLSAL.ID, CLSAL.Currency    
+)            
+
+go
+
+
+  insert into PatchVersioning
+select '1158 Update Script - Patch 2024 (66)',GETDATE()
+go	
+  
+Declare @PrevScript varchar(100)
+Declare @CurrScript varchar(100)
+
+Select @PrevScript=''
+Select @CurrSCript='1158 Update Script - Patch 2024 (66)'
+
+
+Declare @ExecScript varchar(100)
+Declare @ExecScriptStatus varchar(100)
+Declare @Error varchar(200)
+
+Select @Error=''
+
+Begin 
+       Select @ExecScript=Execscript,  @ExecScriptStatus=ExecScriptStatus from systab 
+       if @PrevScript<>'' and @ExecSCript<>@PrevScript
+              THROW 51000, 'Not the Next Sequence Script', 1;
+       else 
+              if @ExecScriptStatus<>'' and @ExecScriptStatus<>'DONE'
+              THROW 51000, 'Pending Script Execution', 1;
+
+       Update SysTab Set ExecScript=@CurrScript, ExecScriptStatus='PENDING'             
+       
+       BEGIN TRY            
+			PRINT '--EXECUTE DONE--'
+       END TRY  
+       BEGIN CATCH  
+       END CATCH;
+
+
+       Update SysTab Set ExecScript=@CurrScript, ExecScriptStatus='DONE'         
+End
+
+
+
+
+go	
+
+ 

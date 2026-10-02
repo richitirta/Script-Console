@@ -1,0 +1,4 @@
+Invalid column name
+Column name or number of supplied values does not match table definition
+Violation of PRIMARY KEY constraint
+String or binary data would be truncated

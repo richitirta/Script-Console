@@ -1,0 +1,33 @@
+
+
+alter table Profile_Batch
+add BankBranch varchar (150)
+go
+alter table Profile_Batch
+add BankAccountName varchar (150)
+go
+alter table Profile_Batch
+add BankAccountNo varchar (20)
+go
+alter table Profile_Batch
+add BankName varchar (255)
+go
+alter table Profile_Batch
+add BCTransferBy int
+go
+alter table Profile_Batch
+add bankCode varchar (10)
+go
+alter table Profile_Batch
+add RefType varchar (50)
+go
+alter table Profile_Batch
+add Currency varchar (5)
+go
+alter table Profile_Batch
+add PRDays int
+go
+alter table Profile_Batch
+add Remarks varchar(512)
+go
+

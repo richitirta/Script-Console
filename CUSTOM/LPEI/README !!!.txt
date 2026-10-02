@@ -1,0 +1,3 @@
+UNTUK LPEI BACKUP DULU SP AutoDailyJournalDetail_Posting existing dari DB PRODUCTION
+
+JANGAN DITIMPA DARI UPDATE CONSOLE !!!

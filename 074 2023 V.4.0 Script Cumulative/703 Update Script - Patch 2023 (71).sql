@@ -1,0 +1,166 @@
+DROP Procedure PCALC02
+GO
+CREATE Procedure PCALC02(@P_ANO integer)
+AS
+
+DECLARE @PCALC02 TABLE (ANO Int, CURRENCY varchar(10), TSI Float, AMOUNT Float)
+
+insert into @PCALC02
+SELECT I.ANO, I.CURRENCY, SUM(CASE WHEN I.CATEGORY='M' Then I.SI Else 0 end) as TSI, SUM(CASE WHEN I.CATEGORY='M' Then I.AMOUNT Else 0 end) AS AMOUNT
+FROM ICOVER I
+WHERE I.ANO=@P_ANO
+GROUP BY I.ANO, I.CURRENCY
+
+SELECT 
+P.ANO, P.CURRENCY,
+MAX(P.TSI) AS TSI,
+MAX(P.AMOUNT) AS AMOUNT,
+SUM(R.Gross) AS PREMIUM, 
+SUM(R.OGROSS) AS OPREMIUM, 
+SUM(R.DISCOUNT) AS DISCOUNT, 
+SUM(R.DDISCOUNT) AS DDISCOUNT, 
+SUM(R.LOADING) AS LOADING
+FROM @PCALC02 P
+LEFT JOIN RCALC R ON (R.ANO=P.ANO and R.CURRENCY=P.CURRENCY)
+GROUP BY P.ANO, P.CURRENCY
+
+
+GO
+
+DROP Procedure PCALC02_ADJ
+GO
+CREATE Procedure PCALC02_ADJ(@P_ANO integer)
+AS
+
+DECLARE @PCALC02 TABLE (ANO Int, CURRENCY varchar(10), TSI Float, AMOUNT Float)
+
+insert into @PCALC02
+SELECT I.ANO, I.CURRENCY, SUM(CASE WHEN I.CATEGORY='M' Then I.SI Else 0 end) as TSI, SUM(CASE WHEN I.CATEGORY='M' Then I.AMOUNT Else 0 end) AS AMOUNT
+FROM ICOVER I
+WHERE I.ANO=@P_ANO and I.ADJUSTABLE=1
+GROUP BY I.ANO, I.CURRENCY
+
+SELECT 
+P.ANO, P.CURRENCY,
+MAX(P.TSI) AS TSI,
+MAX(P.AMOUNT) AS AMOUNT,
+SUM(R.Gross) AS PREMIUM, 
+SUM(R.OGROSS) AS OPREMIUM, 
+SUM(R.DISCOUNT) AS DISCOUNT, 
+SUM(R.DDISCOUNT) AS DDISCOUNT, 
+SUM(R.LOADING) AS LOADING
+FROM @PCALC02 P
+LEFT JOIN RCALC R ON (R.ANO=P.ANO and R.CURRENCY=P.CURRENCY)
+GROUP BY P.ANO, P.CURRENCY
+
+
+GO
+
+DROP Procedure PCALC02_TEMP
+GO
+CREATE Procedure PCALC02_TEMP(@P_ANO integer)
+AS
+
+DECLARE @PCALC02 TABLE (ANO Int, CURRENCY varchar(10), TSI Float, AMOUNT Float)
+
+insert into @PCALC02
+SELECT I.ANO, I.CURRENCY, SUM(CASE WHEN I.CATEGORY='M' Then I.SI Else 0 end) as TSI, SUM(CASE WHEN I.CATEGORY='M' Then I.AMOUNT Else 0 end) AS AMOUNT
+FROM tICOVER I
+WHERE I.ANO=@P_ANO
+GROUP BY I.ANO, I.CURRENCY
+
+SELECT 
+P.ANO, P.CURRENCY,
+MAX(P.TSI) AS TSI,
+MAX(P.AMOUNT) AS AMOUNT,
+SUM(R.Gross) AS PREMIUM, 
+SUM(R.OGROSS) AS OPREMIUM, 
+SUM(R.DISCOUNT) AS DISCOUNT, 
+SUM(R.DDISCOUNT) AS DDISCOUNT, 
+SUM(R.LOADING) AS LOADING
+FROM @PCALC02 P
+LEFT JOIN tRCALC R ON (R.ANO=P.ANO and R.CURRENCY=P.CURRENCY)
+GROUP BY P.ANO, P.CURRENCY
+
+
+GO
+
+DROP Procedure PCALC02_ADJ_TEMP
+GO
+CREATE Procedure PCALC02_ADJ_TEMP(@P_ANO integer)
+AS
+
+DECLARE @PCALC02 TABLE (ANO Int, CURRENCY varchar(10), TSI Float, AMOUNT Float)
+
+insert into @PCALC02
+SELECT I.ANO, I.CURRENCY, SUM(CASE WHEN I.CATEGORY='M' Then I.SI Else 0 end) as TSI, SUM(CASE WHEN I.CATEGORY='M' Then I.AMOUNT Else 0 end) AS AMOUNT
+FROM tICOVER I
+WHERE I.ANO=@P_ANO and I.ADJUSTABLE=1
+GROUP BY I.ANO, I.CURRENCY
+
+SELECT 
+P.ANO, P.CURRENCY,
+MAX(P.TSI) AS TSI,
+MAX(P.AMOUNT) AS AMOUNT,
+SUM(R.Gross) AS PREMIUM, 
+SUM(R.OGROSS) AS OPREMIUM, 
+SUM(R.DISCOUNT) AS DISCOUNT, 
+SUM(R.DDISCOUNT) AS DDISCOUNT, 
+SUM(R.LOADING) AS LOADING
+FROM @PCALC02 P
+LEFT JOIN tRCALC R ON (R.ANO=P.ANO and R.CURRENCY=P.CURRENCY)
+GROUP BY P.ANO, P.CURRENCY
+
+go
+
+
+
+ insert into PatchVersioning	
+select '703 Update Script - Patch 2023 (71)',GETDATE()
+go
+
+
+
+
+
+Declare @PrevScript varchar(100)
+Declare @CurrScript varchar(1004)
+
+Select @PrevScript=''
+Select @CurrSCript='703 Update Script - Patch 2023 (71)'
+
+
+Declare @ExecScript varchar(100)
+Declare @ExecScriptStatus varchar(100)
+Declare @Error varchar(200)
+
+Select @Error=''
+
+Begin 
+       Select @ExecScript=Execscript,  @ExecScriptStatus=ExecScriptStatus from systab 
+       if @PrevScript<>'' and @ExecSCript<>@PrevScript
+              THROW 51000, 'Not the Next Sequence Script', 1;
+       else 
+              if @ExecScriptStatus<>'' and @ExecScriptStatus<>'DONE'
+              THROW 51000, 'Pending Script Execution', 1;
+
+       Update SysTab Set ExecScript=@CurrScript, ExecScriptStatus='PENDING'             
+       
+       BEGIN TRY            
+			PRINT '--EXECUTE DONE--'
+       END TRY  
+       BEGIN CATCH  
+       END CATCH;
+
+
+       Update SysTab Set ExecScript=@CurrScript, ExecScriptStatus='DONE'         
+End
+
+
+
+
+go	
+
+
+
+

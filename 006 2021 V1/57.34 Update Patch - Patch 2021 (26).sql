@@ -1,0 +1,151 @@
+IF EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[PREMIUM_CALCULATION_BASE]') AND type IN ( N'FN', N'IF', N'TF', N'FS', N'FT' ) ) 
+begin
+DROP FUNCTION PREMIUM_CALCULATION_BASE 
+end
+GO
+CREATE FUNCTION PREMIUM_CALCULATION_BASE(@P_ANO int)                  
+
+RETURNS @PCALC TABLE (ANO Int, Currency varchar(10), CANO int, Code varchar(10), SDate SmallDatetime, EDate SmallDatetime, PolicyYear Int, NoRefundF Int, MinimumPremiumF Bit, Premium Float)
+AS
+BEGIN
+
+DECLARE @ACCEPTANCE TABLE (ANO Int, CNO Int, SDate SmallDateTime, EDate SmallDateTime, STime Varchar(5), ETime varchar(5), NOREFUNDF Int, EXCLUSIVEF Bit, AType varchar(10), PDate SmallDateTime, CPCT Float, QTY Int, PANO Int, EMethod varchar(1))
+INSERT INTO @ACCEPTANCE
+SELECT ANO, CNO, SDATE, EDate, STime, ETime, NOREFUNDF, EXCLUSIVEF, ATYPE, PDATE, CPCT, QTY, PANO, EMETHOD 
+FROM ACCEPTANCE WHERE ANO=@P_ANO
+
+INSERT INTO @PCALC
+Select ANO, Currency, CANO, Code, SDate, EDate, PolicyYear, NoRefundF, Cast(Max(MinimumPremiumF) as Bit) as MinimumPremiumF, sum(Premium) as Premium
+ from (                  
+  select Acceptance.ANO, RCalc.Currency, @P_ANO as CANO, RCalc.Code,  RCalc.SDate, RCalc.Edate, cast(datediff(Month,Acceptance.SDate, RCalc.SDate) as integer) / 12 + 1  as PolicyYear,          
+  Acceptance.NoRefundF,   
+  Case When Upper(PCALC.DESCRIPTION) in ('MINIMUM PREMIUM','POLICY MINIMUM PREMIUM') Then 1 else 0 end as MinimumPremiumF,                                       
+  case                  
+  When Acceptance.Atype<>'N' and (RCover.NoRefundF=1 or Acceptance.NoRefundF in (2,4) or (Acceptance.NoRefundF in (1) and DateDiff(day, acceptance.pdate, RCalc.SDate) <= 0)) Then 0
+  When Acceptance.AType<>'N' then                  
+   case                  
+   when DateDiff(day, rcalc.Edate, acceptance.pdate)>=0 then 0                  
+   when DateDiff(day, acceptance.pdate, rcalc.SDate)>0 then 1                  
+   Else                  
+    case                  
+    when acceptance.cpct<>0 or Cover.Voyage=1 then                  
+     case                  
+     when acceptance.cpct<>0 then                  
+		acceptance.cpct/100                  
+     Else                  
+		1                  
+     End                  
+    Else                  
+		--Prorata Calculation
+		Case When Acceptance.EXCLUSIVEF=0 and Acceptance.STime<Acceptance.ETime and RCalc.EDate=Acceptance.EDate Then
+			dbo.fn_calc_prorata(acceptance.pDate, dateadd(day,1,RCalc.edate), RCalc.Sdate, dateadd(day,1,RCalc.edate), Cover.PPeriod)
+		else
+			dbo.fn_calc_prorata(acceptance.pDate, RCalc.Edate, RCalc.Sdate, RCalc.EDate, Cover.PPeriod)
+		End
+    End                  
+   End                  
+  Else                  
+	1                  
+  End                  
+  * (Case When Acceptance.Qty=0 Then 1 else Acceptance.Qty end)                  
+  * (Case When PCALC.DESCRIPTION='Minimum Premium' Then RCALC.GROSS else (Case When PCALC.OGROSS<>0 THEN RCALC.OGROSS*PCALC.GROSS/PCALC.OGROSS ELSE PCALC.GROSS END) END+RCalc.Reinstatement)  
+  * coalesce(case When ISource.Limit<>0 then ISource.Limit/(ISource.Limit+ISource.Excess) else 1 end*ISource.Share/100,1) as Premium
+  From @Acceptance acceptance
+  Inner Join cover on (Cover.CNO=Acceptance.CNO)
+  Inner Join RCalc on (RCalc.ANO=Acceptance.ANO)
+  Inner Join RCover on (RCOVER.ANO=RCALC.ANO AND RCOVER.CODE=RCALC.CODE AND RCOVER.SDATE=RCALC.SDATE)
+  Inner Join PCalc on (PCalc.ANO=RCalc.ANO and PCalc.Currency=RCalc.Currency)
+  Left Join ISource on (ISource.CNO=Cover.CNO)
+  Where Acceptance.ANO=@P_ANO 
+  and Acceptance.AType not in ('A','C')                  
+  and PCalc.Gross<>0          
+                                                    
+  Union All                  
+                                                                                             
+  select Acceptance.ANO, RCalc.Currency, Acceptance.PANO as CANO, RCalc.Code, RCalc.SDate, RCalc.Edate, cast(datediff(Month,pAcceptance.SDate, RCalc.SDate) as integer) / 12 + 1 as PolicyYear,          
+  Acceptance.NoRefundF,   
+  Case When Upper(PCALC.DESCRIPTION) in ('MINIMUM PREMIUM','POLICY MINIMUM PREMIUM') Then 1 else 0 end as MinimumPremiumF,                                       
+  -case     
+  When Acceptance.Atype<>'N' and (coalesce(RCover.NoRefundF,0)=1 or Acceptance.NoRefundF in (2,4) or (Acceptance.NoRefundF in (1) and DateDiff(day, acceptance.pdate, RCalc.SDate) <= 0)) Then 0
+  when DateDiff(day, rcalc.Edate, acceptance.pdate)>=0 and acceptance.pdate between pacceptance.sdate and pacceptance.edate then 0                  
+  when DateDiff(day, acceptance.pdate, rcalc.SDate)>0 and acceptance.pdate between pacceptance.sdate and pacceptance.edate then 1                  
+  Else                  
+   case                  
+   when acceptance.cpct<>0 or Cover.Voyage=1 then                  
+    case                  
+    when acceptance.cpct<>0 then                  
+		acceptance.cpct/100                  
+    Else                  
+		1                  
+    End                  
+   Else                  
+    case                  
+    When Acceptance.SDate<>Acceptance.PDate or Acceptance.NoRefundF=6 then                  
+		--Prorata Calculation
+		Case When pAcceptance.EXCLUSIVEF=0 and pAcceptance.STime<pAcceptance.ETime and RCalc.EDate=pAcceptance.EDate Then
+			CASE WHEN RCOVER.CPFORMULA='PRORATE SQ' and Acceptance.AType='C' and Acceptance.EMethod<>'A' THEN
+				POWER(dbo.fn_calc_prorata(dbo.fn_Get_Effective_Cancellation_By_Payor_Schedule(Acceptance.ANO, Acceptance.PDate,dateadd(day,1,RCalc.edate)), dateadd(day,1,RCalc.edate), RCalc.Sdate, dateadd(day,1,RCalc.edate), Cover.PPeriod), 2)
+			ELSE
+				CASE WHEN Acceptance.AType='C' and Acceptance.EMethod<>'A' THEN
+					dbo.fn_calc_prorata(dbo.fn_Get_Effective_Cancellation_By_Payor_Schedule(Acceptance.ANO, Acceptance.PDate,dateadd(day,1,RCalc.edate)), dateadd(day,1,RCalc.edate), RCalc.Sdate, dateadd(day,1,RCalc.edate), Cover.PPeriod)
+				Else
+					dbo.fn_calc_prorata(acceptance.pDate, dateadd(day,1,RCalc.edate), RCalc.Sdate, dateadd(day,1,RCalc.edate), Cover.PPeriod)
+				End
+			END			
+		else
+			CASE WHEN RCOVER.CPFORMULA='PRORATE SQ' and Acceptance.AType='C' and Acceptance.EMethod<>'A' THEN
+				POWER(dbo.fn_calc_prorata(dbo.fn_Get_Effective_Cancellation_By_Payor_Schedule(Acceptance.ANO, Acceptance.PDate,RCalc.Edate), RCalc.Edate, RCalc.Sdate, RCalc.EDate, Cover.PPeriod), 2)
+			ELSE
+				CASE WHEN Acceptance.AType='C' and Acceptance.EMethod<>'A' THEN
+					dbo.fn_calc_prorata(dbo.fn_Get_Effective_Cancellation_By_Payor_Schedule(Acceptance.ANO, Acceptance.PDate,RCalc.Edate), RCalc.Edate, RCalc.Sdate, RCalc.EDate, Cover.PPeriod)
+				Else
+					dbo.fn_calc_prorata(acceptance.pDate, RCalc.Edate, RCalc.Sdate, RCalc.EDate, Cover.PPeriod)
+				End
+			END			
+		End
+    Else                  
+    -- Endorsement Period                  
+		1                  
+    End                  
+   End                  
+  End                  
+  * (Case When pAcceptance.Qty=0 Then 1 else pAcceptance.Qty end)                  
+  * (Case When PCALC.DESCRIPTION='Minimum Premium' Then RCALC.GROSS else (Case When PCALC.OGROSS<>0 THEN RCALC.OGROSS*PCALC.GROSS/PCALC.OGROSS ELSE PCALC.GROSS END) END+RCalc.Reinstatement)
+  * coalesce(case When ISource.Limit<>0 then ISource.Limit/(ISource.Limit+ISource.Excess) else 1 end*ISource.Share/100,1) 
+  * (Case When Acceptance.CPCT=0 and Acceptance.AType='C' and Acceptance.EMethod<>'A' and RCover.CPRefund<>0 and Not (DateDiff(day, acceptance.pdate, rcalc.SDate)>0 and acceptance.pdate between pacceptance.sdate and pacceptance.edate) Then RCover.CPRefund/100 else 1 end) as Premium      
+  from @Acceptance Acceptance 
+  inner join Acceptance pAcceptance on (pAcceptance.ANO=Acceptance.pANO) 
+  inner Join Cover on (Cover.CNO=pAcceptance.CNO)                  
+  inner join PCalc on (PCalc.ANO=pAcceptance.ANO) 
+  inner join RCalc on (RCalc.ANO=PCalc.ANO and RCalc.Currency=PCalc.Currency)                  
+  Left Join ISource on (ISource.CNO=Cover.CNO)
+  Left Join RCover on (RCover.ANO=Acceptance.ANO and RCover.Code=RCalc.Code and ((RCover.SDate=Acceptance.SDate and RCover.EDate=Acceptance.EDate and RCalc.SDate=pAcceptance.SDate and RCalc.EDate=pAcceptance.EDate) or (RCover.SDate=RCalc.SDate)))
+  Where Acceptance.ANO=@P_ANO and Acceptance.AType<>'A' and Not (Acceptance.AType='C' and Acceptance.EMethod='A') and pAcceptance.AType not in ('A','C')                  
+  and PCalc.Gross<>0                    
+                                                    
+  Union All                  
+        
+  select Acceptance.ANO, RCalc.Currency, @P_ANO as CANO, RCalc.Code, RCalc.SDate, RCalc.Edate, cast(datediff(Month,Acceptance.SDate, RCalc.SDate) as integer) / 12 + 1 as PolicyYear,      
+  Acceptance.NoRefundF,       
+  Case When Upper(PCALC.DESCRIPTION) in ('MINIMUM PREMIUM','POLICY MINIMUM PREMIUM') Then 1 else 0 end as MinimumPremiumF,                                       
+  (Case When PCALC.DESCRIPTION='Minimum Premium' Then RCALC.GROSS else (Case When PCALC.OGROSS<>0 THEN RCALC.OGROSS*PCALC.GROSS/PCALC.OGROSS ELSE PCALC.GROSS END) END+RCalc.Reinstatement)
+  * coalesce(case When ISource.Limit<>0 then ISource.Limit/(ISource.Limit+ISource.Excess) else 1 end*ISource.Share/100,1) as Premium
+  From @Acceptance acceptance
+  Inner Join RCALC on (RCalc.ANO=Acceptance.ANO)
+  Inner Join PCalc on (PCalc.ANO=RCalc.ANO and PCalc.Currency=RCalc.Currency)
+  Left Join Acceptance sAcceptance on (sAcceptance.ANO=RCalc.SANO) 
+  Left Join ISource on (ISource.CNO=sAcceptance.CNO)
+  Where Acceptance.ANO=@P_ANO 
+  and Acceptance.AType='A'                  
+  and PCalc.Gross<>0   
+        
+) T                  
+                                      
+Group By ANO, Currency, CANO, Code, SDate, EDate, PolicyYear, NoRefundF  
+
+RETURN
+
+END
+
+GO
+

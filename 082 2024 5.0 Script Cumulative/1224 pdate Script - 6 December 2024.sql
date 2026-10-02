@@ -1,0 +1,96 @@
+IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = N'Last_Opr' AND Object_ID = Object_ID(N'OGIS_LOG_DETAIL'))
+BEGIN
+
+SET QUOTED_IDENTIFIER ON
+SET ARITHABORT ON
+SET NUMERIC_ROUNDABORT OFF
+SET CONCAT_NULL_YIELDS_NULL ON
+SET ANSI_NULLS ON
+SET ANSI_PADDING ON
+SET ANSI_WARNINGS ON
+
+
+ALTER TABLE dbo.OGIS_LOG_DETAIL ADD
+	Last_Opr varchar(50) NULL
+end
+go
+
+
+IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = N'Last_Update' AND Object_ID = Object_ID(N'OGIS_LOG_DETAIL'))
+BEGIN
+
+SET QUOTED_IDENTIFIER ON
+SET ARITHABORT ON
+SET NUMERIC_ROUNDABORT OFF
+SET CONCAT_NULL_YIELDS_NULL ON
+SET ANSI_NULLS ON
+SET ANSI_PADDING ON
+SET ANSI_WARNINGS ON
+
+
+ALTER TABLE dbo.OGIS_LOG_DETAIL ADD
+	Last_Update smalldatetime NULL
+end
+go
+
+
+IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = N'Last_Time' AND Object_ID = Object_ID(N'OGIS_LOG_DETAIL'))
+BEGIN
+
+SET QUOTED_IDENTIFIER ON
+SET ARITHABORT ON
+SET NUMERIC_ROUNDABORT OFF
+SET CONCAT_NULL_YIELDS_NULL ON
+SET ANSI_NULLS ON
+SET ANSI_PADDING ON
+SET ANSI_WARNINGS ON
+
+
+
+ALTER TABLE dbo.OGIS_LOG_DETAIL ADD
+	Last_Time varchar(8) NULL
+end
+go
+
+
+  insert into PatchVersioning
+select '1227 Update Script - 4 October 2024',GETDATE()
+go	
+  
+Declare @PrevScript varchar(100)
+Declare @CurrScript varchar(100)
+
+Select @PrevScript=''
+Select @CurrSCript='1227 Update Script - 4 October 2024'
+
+
+Declare @ExecScript varchar(100)
+Declare @ExecScriptStatus varchar(100)
+Declare @Error varchar(200)
+
+Select @Error=''
+
+Begin 
+       Select @ExecScript=Execscript,  @ExecScriptStatus=ExecScriptStatus from systab 
+       if @PrevScript<>'' and @ExecSCript<>@PrevScript
+              THROW 51000, 'Not the Next Sequence Script', 1;
+       else 
+              if @ExecScriptStatus<>'' and @ExecScriptStatus<>'DONE'
+              THROW 51000, 'Pending Script Execution', 1;
+
+       Update SysTab Set ExecScript=@CurrScript, ExecScriptStatus='PENDING'             
+       
+       BEGIN TRY            
+			PRINT '--EXECUTE DONE--'
+       END TRY  
+       BEGIN CATCH  
+       END CATCH;
+
+
+       Update SysTab Set ExecScript=@CurrScript, ExecScriptStatus='DONE'         
+End
+
+
+
+
+go	
